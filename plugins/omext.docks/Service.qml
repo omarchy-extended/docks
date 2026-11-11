@@ -243,6 +243,7 @@ Item {
     target: "omext.docks"
     function refresh(): void { root.refresh() }
     function open(id: string): void { root.setOpen(id, true) }  // as resting on its edge does
+    function shut(id: string): void { root.setOpen(id, false) }  // (its key, pressed again)
     function expand(id: string, app: string): void { root.expand(id, app) }  // as clicking its bar icon does
     function pick(id: string): void { root.pickSettings = false; root.openPicker(id) }
     function unpick(): void { root.picking = "" }  // the apps menu closed
@@ -1660,6 +1661,49 @@ Item {
                           options: [{ id: "off", label: "No", hint: "It slides away when the pointer leaves." },
                                     { id: "on", label: "Yes", hint: "It stays open; other windows make room beside it." }]
                           onPicked: id => root.run(["keep-open", dcard.d.id, id])
+                        }
+                      }
+                      SetRow {
+                        label: "Key"
+                        Row {
+                          spacing: 6
+                          Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 150; height: 22; radius: 4
+                            color: Commons.Util.alpha(Commons.Color.foreground, 0.08)
+                            border.color: Commons.Util.alpha(root.accent, keyIn.activeFocus ? 1 : 0.4)
+                            TextInput {
+                              id: keyIn
+                              anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                              verticalAlignment: TextInput.AlignVCenter
+                              color: Commons.Color.popups.text
+                              font.family: Commons.Style.font.family
+                              font.pixelSize: Commons.Style.font.bodySmall
+                              clip: true
+                              text: dcard.d.key || ""
+                              function apply() {
+                                if (text.trim() !== (dcard.d.key || "")) root.run(["key", dcard.d.id, text.trim() || "none"])
+                              }
+                              Keys.onReturnPressed: { apply(); focus = false }
+                              Keys.onEnterPressed: { apply(); focus = false }
+                              Keys.onEscapePressed: root.picking = ""
+                              onEditingFinished: apply()
+                              Text {
+                                visible: !parent.text
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "none"
+                                color: Commons.Util.alpha(Commons.Color.popups.text, 0.4)
+                                font: parent.font
+                              }
+                            }
+                          }
+                          Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "as SUPER + ALT + D"
+                            color: Commons.Util.alpha(Commons.Color.popups.text, 0.6)
+                            font.family: Commons.Style.font.family
+                            font.pixelSize: Commons.Style.font.caption
+                          }
                         }
                       }
                       SetRow {

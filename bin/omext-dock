@@ -17,6 +17,8 @@ Usage:
   omext-dock add-separator <dock>         a line between the icons on the dock's bar, last on it
                                         (dragged to its place; removed as an app is)
   omext-dock separator-look line|space    the separators as a line, or as a space only
+  omext-dock key <dock> <keys>|none       the keys that open the dock and close it again, as
+                                        Hyprland writes them (SUPER + ALT + D); none by default
   omext-dock favorite <dock> <app> on|off from when there were favorites: means nothing now
                                         (every app stays in its dock until removed)
   omext-dock mode <dock> single|free      one app open at a time, or any
@@ -941,6 +943,7 @@ def cmd_list():
                     "rect": rect, "width": rect[2], "minWidth": needed_width(dock, m),
                     "maxWidth": max_width(dock, m), "maxWidthPct": int(dock.get("maxWidthPct") or 0),
                     "dockWidth": int(dock.get("width", 420)),
+                    "key": str(dock.get("key") or ""),
                     "keepOpen": bool(dock.get("keepOpen")), "mode": "single" if is_single(dock) else "free",
                     "look": look(dock), "iconSize": icon_size(dock),
                     "barWidth": bar_width(dock),
@@ -970,6 +973,72 @@ def cmd_toggle(args):
     if not args:
         die("toggle needs a dock id")
     cmd_open(args, not is_open(args[0]))
+
+
+# A key to open a dock and close it again (none until one is set: Settings ›
+# the dock › Key). Hyprland binds the keys from a file written here, which the
+# addon's hypr/keys.lua loads: the config is JSON, and Lua has no reader for it.
+KEYS_LUA = STATE / "keys.lua"
+
+
+def write_keys(data):
+    lines = ["-- Written by omext-dock (the docks' keys); see omext-dock key."]
+    for dock in data["docks"]:
+        keys = str(dock.get("key") or "").strip()
+        if not keys or dock.get("off"):
+            continue
+        side = "left" if dock["edge"] == "left" else "right"
+        lines += [f"pcall(hl.unbind, {q(keys)})",
+                  f"pcall(hl.bind, {q(keys)}, hl.dsp.exec_cmd({q('omext-dock key-toggle ' + dock['id'])}), "
+                  f"{{ description = {q('Open or close the ' + side + ' dock')} }})"]
+    STATE.mkdir(parents=True, exist_ok=True)
+    KEYS_LUA.write_text("\n".join(lines) + "\n")
+    subprocess.run(["hyprctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def cmd_key(args):
+    """key <dock> <keys>|none: the keys that open the dock and close it again,
+    as Hyprland writes them ("SUPER + ALT + D"). They are taken from whatever
+    had them."""
+    if len(args) < 2:
+        die("key needs a dock and its keys (as SUPER + ALT + D), or none")
+    keys = " ".join(args[1:]).strip()
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        if keys.lower() == "none" or not keys:
+            dock.pop("key", None)
+        else:
+            if not re.fullmatch(r"[A-Za-z0-9_]+(\s*\+\s*[A-Za-z0-9_]+)*", keys):
+                die("keys are written as SUPER + ALT + D")
+            dock["key"] = " + ".join(k.strip().upper() if k.strip().isalpha() else k.strip() for k in keys.split("+"))
+        write_keys(data)
+    refresh_shell()
+
+
+def cmd_key_toggle(args):
+    """The dock's key pressed: open, it closes; else it opens as resting on its
+    edge does, and the pointer goes onto its app (it has the keyboard then, and
+    the dock stays open while the pointer is there)."""
+    if not args:
+        die("key-toggle needs a dock")
+    dock = find_dock(read_config(), args[0])
+    shell = ["omarchy-shell", "-q", "omext.docks"]
+    if is_open(dock["id"]):
+        subprocess.run(shell + ["shut", dock["id"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    subprocess.run(shell + ["open", dock["id"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    mine = [a for a in dock["apps"] if not a.get("separator")]
+    for _ in range(60):
+        time.sleep(0.05)
+        clients, monitors = hypr("clients"), hypr("monitors")
+        up = {m["specialWorkspace"]["name"] for m in monitors}
+        for app in mine:
+            c = window(app, clients)
+            if c and is_expanded(app) and (c["workspace"]["id"] > 0 or c["workspace"]["name"] in up):
+                x, y = c["at"][0] + c["size"][0] // 2, c["at"][1] + c["size"][1] // 2
+                dispatch(f"hl.dsp.cursor.move({{ x = {x}, y = {y} }})",
+                         f"hl.dsp.focus({{ window = {q('address:' + c['address'])} }})")
+                return
 
 
 def cmd_add_separator(args):
@@ -2359,7 +2428,7 @@ def main():
             log.write(f"{time.strftime('%H:%M:%S')} {os.getppid()} {' '.join(args)}\n")
     commands = {
         "list": lambda: cmd_list(), "open": lambda: cmd_open(rest), "close": lambda: cmd_open(rest, False),
-        "toggle": lambda: cmd_toggle(rest), "expand": lambda: cmd_expand(rest), "add": lambda: cmd_add(rest), "add-separator": lambda: cmd_add_separator(rest),
+        "toggle": lambda: cmd_toggle(rest), "expand": lambda: cmd_expand(rest), "add": lambda: cmd_add(rest), "add-separator": lambda: cmd_add_separator(rest), "key": lambda: cmd_key(rest), "key-toggle": lambda: cmd_key_toggle(rest),
         "mode": lambda: cmd_mode(rest), "default": lambda: cmd_default(rest), "look": lambda: cmd_look(rest),
         "icon-size": lambda: cmd_icon_size(rest), "icon-style": lambda: cmd_icon_style(rest), "separator-look": lambda: cmd_separator_look(rest),
         "take": lambda: cmd_take(rest), "instance": lambda: cmd_instance(rest),

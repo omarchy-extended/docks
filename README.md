@@ -32,6 +32,9 @@ opens.
 - **Settings.** The gear under the + has that dock's settings, and what goes
   for every dock.
 - **Escape** closes an open dock, unless a terminal in it has the keyboard.
+- **A key of its own**, if you set one (Settings › the dock › Key, as
+  `SUPER + ALT + D`): it opens the dock with the pointer on its app, and
+  closes it again. None by default.
 - **On or off.** Omarchy menu › Setup › Omarchy Extended › Docks, or `omext-dock disable` / `enable`.
 
 | Adding an app | The settings |
