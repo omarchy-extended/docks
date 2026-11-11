@@ -1023,9 +1023,32 @@ def cmd_key_toggle(args):
         die("key-toggle needs a dock")
     dock = find_dock(read_config(), args[0])
     shell = ["omarchy-shell", "-q", "omext.docks"]
+    back = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / f"omext-dock-key-{dock['id']}.json"
     if is_open(dock["id"]):
+        # The pointer on it keeps it open: back to where it was when the key
+        # opened the dock, and the window that had the keyboard then.
+        try:
+            was = json.loads(back.read_text())
+        except (OSError, ValueError):
+            was = {}
+        back.unlink(missing_ok=True)
+        m = dock_monitor(dock, hypr("monitors"))
+        if "x" not in was and m:  # (opened by the pointer: the middle of its screen)
+            w, h = logical(m)
+            was = {"x": int(m["x"] + w / 2), "y": int(m["y"] + h / 2)}
+        # (The window first, and without the pointer going to its middle: that
+        # can be over the dock, which would then stay open.)
+        if was.get("window") and any(c["address"] == was["window"] for c in hypr("clients")):
+            focus_still(was["window"])
+        if "x" in was:
+            dispatch(f"hl.dsp.cursor.move({{ x = {was['x']}, y = {was['y']} }})")
         subprocess.run(shell + ["shut", dock["id"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return
+    try:
+        pos = hypr("cursorpos")
+        back.write_text(json.dumps({"x": int(pos["x"]), "y": int(pos["y"]), "window": hypr("activewindow").get("address", "")}))
+    except Exception:
+        pass
     subprocess.run(shell + ["open", dock["id"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     mine = [a for a in dock["apps"] if not a.get("separator")]
     for _ in range(60):
