@@ -46,7 +46,9 @@ link "$dir/systemd/omext-docks.service" "$unit"
 sed -i "/^-- BEGIN $mark\$/,/^-- END $mark\$/d" "$hypr_conf"
 {
   echo "-- BEGIN $mark"
-  for f in "$dir"/hypr/*.lua; do echo "pcall(dofile, \"$f\")"; done
+  # (By folder, each time Hyprland reads its config: a file added by an update
+  # is loaded without installing again.)
+  echo "for f in io.popen('ls \"$dir\"/hypr/*.lua 2>/dev/null'):lines() do pcall(dofile, f) end"
   echo "-- END $mark"
 } >> "$hypr_conf"
 info "loads its Hyprland rules from $hypr_conf"
