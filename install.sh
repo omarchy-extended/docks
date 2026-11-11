@@ -81,4 +81,4 @@ fi
 systemctl --user daemon-reload
 systemctl --user enable omext-docks.service >/dev/null 2>&1
 "$bin/omext-dock" enable  # the plugin on, the watcher started, Hyprland reloaded
-info "done. Hover the right screen edge; the apps menu's gear has the settings."
+info "done. Hover the right screen edge: + on its bar adds an app, the gear under it has the settings."
