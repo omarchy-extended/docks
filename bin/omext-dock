@@ -1,0 +1,2389 @@
+#!/usr/bin/env python3
+"""Docks at the screen edges, holding apps stacked in a column.
+
+Usage:
+  omext-dock list                         JSON of the docks, their apps and where things go
+  omext-dock open|close|toggle <dock>     show or hide a dock's apps
+  omext-dock expand <dock> <app> [on|off] expand or collapse an app (default: toggle); in a
+                                        single dock one app is expanded at a time, so
+                                        expanding one collapses the others, and the last
+                                        open app can't be collapsed (it opens on its top
+                                        app); in a free one each opens and closes on its own
+  omext-dock add <dock> <desktop-id> [--favorite] [--group G|none] [--before|--after APP]
+  omext-dock add <dock> --window ADDR [--favorite] [--group G|none] [--before|--after APP]
+                                        add an installed app or an open window to a dock;
+                                        it stays there until it is removed (--favorite:
+                                        from when there were favorites, means nothing)
+  omext-dock add-separator <dock>         a line between the icons on the dock's bar, last on it
+                                        (dragged to its place; removed as an app is)
+  omext-dock separator-look line|space    the separators as a line, or as a space only
+  omext-dock favorite <dock> <app> on|off from when there were favorites: means nothing now
+                                        (every app stays in its dock until removed)
+  omext-dock mode <dock> single|free      one app open at a time, or any
+  omext-dock look <dock> hidden|line|bar|slim|icons
+                                        how the closed dock shows: not at all, a dimmed line,
+                                        a bar that takes room, a slim bar with its apps'
+                                        small icons hanging half out of it, or a bar of
+                                        its apps' icons (all but hidden and line take room)
+  omext-dock icon-size <dock> small|large the bar's icons, whatever the look
+  omext-dock icon-style color|mono|mixed  every dock's icons in their colours, monochrome (in the
+                                        theme's text colour), or mixed: monochrome for pinned
+                                        apps that aren't running, colour for running ones
+  omext-dock take <dock> <app>            move an app (from whichever dock) to this one
+  omext-dock dock <dock> on|off           turn a dock off (gone from its edge, its apps' windows
+                                        let go) or on again; the last one on stays on
+  omext-dock release-all                  every dock's windows let go
+  omext-dock disable                      turn the docks off: every dock's windows let go, the
+                                        watcher stopped, the shell plugin off (kept off at login)
+  omext-dock enable                       turn them on again
+  omext-dock enabled                      exit 0 if the docks are on
+  omext-dock relocate <app> <dock> [before|after <other>|end] [group <name>|none] [favorite]
+                                        an app put in a dock at a place (the apps menu's drag)
+  omext-dock multi <dock> <app> on|off    the app may run more than once, an instance per dock
+  omext-dock instance <dock> <app>        one more of a multi app, in this dock (not a favorite)
+  omext-dock default <dock> <app>         the favorite the dock opens on: started with the dock,
+                                        and opened when its last open app closes (default: the
+                                        first favorite)
+  omext-dock move <dock> <app> up|down    one place up or down the bar (past the next
+                                        running app)
+  omext-dock move <dock> <app> before|after <other>|end
+                                        to just before or after another app, or last
+  omext-dock send [--dock ID | --edge left|right] [--quiet] --window ADDR
+                                        a window into a dock (the titlebar's buttons): the dock
+                                        on that edge, else its app's own dock, else the dock on
+                                        its screen; an app in another dock moves along; the
+                                        dock opens on it
+  omext-dock remove <dock> <app>          take it out of the dock (the window is left alone)
+  omext-dock back --window ADDR           a dock's app that is out of its dock goes back in, the dock
+                                        staying as it is (exit 1 when no dock's app takes the window)
+  omext-dock release <dock> <app>         its window leaves the dock: a normal floating window,
+                                        centred on the screen in front. A favorite stays in
+                                        the dock (opening it there brings the window back);
+                                        an app opened in it leaves it
+  omext-dock float <desktop-id>           open an installed app outside the docks, floating
+  omext-dock float <dock> <app>           the same for a dock's app (running: released)
+  omext-dock fix-windows                  docked windows drawn out of place (their top cut off under
+                                        the dock's bar) are set right as they next show
+  omext-dock restart <dock> <app>        close the app (ending it if it lingers) and start it again
+  omext-dock quit <dock> <app>            close the app; it stays closed until expanded (or the
+                                        next login)
+  omext-dock start-on-load <dock> <app> on|off
+                                        the app started (hidden) when omext-dock watch
+                                        starts, at login
+  omext-dock pin <dock> <app> on|off      from when icons could be pinned: means nothing now
+                                        (every app's icon is on its dock's bar)
+  omext-dock keep-alive <dock> <app> on|off
+                                        the app started again when it closes (not when quit)
+  omext-dock new left|right [--monitor NAME]   a dock on that edge of a screen (default: focused)
+  omext-dock delete <dock>
+  omext-dock width <dock> <px> [--live]   the dock's width in layout pixels (never less than
+                                        its apps' widest minimum); --live only moves the
+                                        windows, quickly (while the edge is dragged)
+  omext-dock max-width <dock> <percent>|default
+                                        the widest the dock gets, in % of its screen
+                                        (default: 90)
+  omext-dock keep-open <dock> on|off      kept open, it takes its width from the screen
+                                        (windows and zones make room); else it lies on top
+  omext-dock candidates                   JSON list of installed apps and open windows to add
+  omext-dock rescue                       bring floating windows that are partly off their screen
+                                        back onto it (done by watch when a screen goes)
+  omext-dock watch                        keep the docks' apps running, follow windows and unread
+                                        counts (systemd service)
+
+Docks are in ~/.config/omext/docks.json (OMEXT_DOCKS_FILE overrides; a link to
+another file is followed):
+
+  {"docks": [{"id": "left-1", "monitor": "<screen description>", "edge": "left",
+              "width": 420, "keepOpen": false, "mode": "single",
+              "apps": [{"id": "slack", "name": "Slack", "class": "slack",
+                        "title": "optional regex", "launch": ["uwsm-app", "--", "slack.desktop"],
+                        "icon": "slack", "expanded": true,
+                        "alertsOnly": false, "favorite": true,
+                        "startOnLoad": true, "keepAlive": true}]}]}
+
+An app without startOnLoad or keepAlive has them on. Every app stays in its
+dock until it is removed; "favorite" and "pinned" are from before, and ignored.
+
+The omext.docks shell plugin draws the docks: an invisible strip at the edge
+opens one on hover; open, a bar on its edge has its running apps' icons (a click
+shows or hides the app), and the shown apps share the dock's height. Their windows are floating and pinned
+(on every workspace) while the dock is open, and wait on a hidden workspace of
+its own (special:omext-dock-<dock>, kept on the dock's screen) while it is closed:
+so they never change scale on the way (some apps are then drawn off by ~20 px).
+One per dock, not per screen name: Hyprland numbers each new special workspace
+one above the highest in use, and new names at every replug would climb to -1.
+"""
+
+import fcntl
+import json
+import os
+import re
+import shlex
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+# The settings files, read and written omext core's way (as every omext tool does).
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy/plugins/omext.core"))
+try:
+    import omext_settings as settings
+except ImportError:
+    sys.exit("omext-dock: needs omext core (https://github.com/omarchy-extended/core)")
+
+PLUGIN = "omext.docks"  # the shell plugin's id
+SERVICE = "omext-docks.service"  # the watcher (omext-dock watch)
+CONFIG = Path(os.environ.get("OMEXT_DOCKS_FILE")
+              or Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omext" / "docks.json")
+STATE = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "omext" / "docks"
+DISABLED = STATE / "disabled"  # the docks turned off (omext-dock disable)
+QUIT = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "omext-dock-quit"  # closed on purpose, until next login
+LAUNCHING = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "omext-dock-launch"  # when each app was last started
+RESTARTING = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "omext-dock-restart"  # apps being restarted: the watcher leaves them be
+HIDDEN = "special:omext-dock"  # each dock's hidden workspace: this, -<dock id>
+
+
+def hidden_of(dock):
+    return f"{HIDDEN}-{dock['id']}" if dock else HIDDEN
+
+
+def is_hidden(name):
+    return name == HIDDEN or name.startswith(HIDDEN + "-")
+TITLEBAR_TAG = "omarchy-floating-workspace"  # Omarchy's titlebars; dock apps have the dock's bar instead
+EDGES = ("left", "right")
+ALERT_TITLE = re.compile(r"har skickat ett meddelande|sent you a message", re.I)  # a web app's flashing title
+FLASH_WAIT = 60  # s in which the same flashing title is still the same message
+
+
+def die(msg):
+    print(f"omext-dock: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def hypr(what):
+    return json.loads(subprocess.run(["hyprctl", what, "-j"], capture_output=True, text=True, check=True).stdout)
+
+
+def q(value):
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def dispatch(*exprs):
+    """In one go, so no frame is drawn between them."""
+    if exprs:
+        subprocess.run(["hyprctl", "--batch", ";".join(f"dispatch {e}" for e in exprs)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def refresh_shell():
+    subprocess.run(["omarchy-shell", "-q", PLUGIN, "refresh"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def logical(m):
+    w, h = m["width"] / m["scale"], m["height"] / m["scale"]
+    return (h, w) if m.get("transform", 0) % 2 else (w, h)
+
+
+# --- config -----------------------------------------------------------------
+
+def read_config():
+    data = settings.read(CONFIG, {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("docks", [])
+    # From when apps had groups (2026-11: gone, with favorites). Sorted by group
+    # then, the apps showed in the groups' order: that order is theirs now.
+    if data.pop("groupSort", None):
+        groups = [g for g in data.get("groupOrder", [])]
+        for d in data["docks"]:
+            for a in d["apps"]:
+                if a.get("group", "") not in groups:
+                    groups.append(a.get("group", ""))
+        for d in data["docks"]:
+            d["apps"].sort(key=lambda a: groups.index(a.get("group", "")))  # (stable: each group in its order)
+    data.pop("groupOrder", None)
+    for d in data["docks"]:
+        for a in d["apps"]:
+            a.pop("group", None)
+            a.pop("alias", None)  # (a name of its own for an app: gone too; its "name" is its name)
+    return data
+
+
+def write_config(data):
+    data.pop("favView", None)  # from when favorites could show as tiles
+    for dock in data["docks"]:
+        # Every dock has its default app set, and always one of its favorites:
+        # none set (or that one gone, or no longer a favorite), the first.
+        d = default_app(dock)
+        if d:
+            d["favorite"] = True
+            dock["default"] = d["id"]
+        else:
+            dock.pop("default", None)
+    settings.write(CONFIG, data)  # a link's file, not the link (kept elsewhere, e.g. in git)
+
+
+class Config:
+    """The config, locked while it's changed: the watcher and clicks can overlap."""
+
+    def __enter__(self):
+        STATE.mkdir(parents=True, exist_ok=True)
+        self.lock = open(STATE / "config.lock", "w")
+        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        self.data = read_config()
+        return self.data
+
+    def __exit__(self, *exc):
+        if exc[0] is None:
+            write_config(self.data)
+        self.lock.close()
+
+
+def find_dock(data, dock_id):
+    dock = next((d for d in data["docks"] if d["id"] == dock_id), None)
+    if not dock:
+        die(f"no dock '{dock_id}'")
+    return dock
+
+
+def find_app(dock, app_id):
+    app = next((a for a in dock["apps"] if a["id"] == app_id), None)
+    if not app:
+        die(f"no app '{app_id}' in dock '{dock['id']}'")
+    return app
+
+
+def slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "app"
+
+
+def unique(base, taken):
+    out, n = base, 2
+    while out in taken:
+        out, n = f"{base}-{n}", n + 1
+    return out
+
+
+# --- state ------------------------------------------------------------------
+
+def read_state():
+    try:
+        return json.loads((STATE / "state.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_state(st):
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / "state.tmp"
+    tmp.write_text(json.dumps(st) + "\n")
+    tmp.replace(STATE / "state.json")
+
+
+def set_open(dock_id, on):
+    st = read_state()
+    opened = set(st.get("open", []))
+    (opened.add if on else opened.discard)(dock_id)
+    st["open"] = sorted(opened)
+    write_state(st)
+
+
+def is_open(dock_id):
+    return dock_id in read_state().get("open", [])
+
+
+def unread_counts():
+    return read_state().get("unread", {})
+
+
+def hold_unread(app_id, count):
+    st = read_state()
+    counts = st.setdefault("unread", {})
+    if count:
+        counts[app_id] = count
+    else:
+        counts.pop(app_id, None)
+    write_state(st)
+
+
+# --- windows ----------------------------------------------------------------
+
+def classes(app):
+    """The app's window classes: one, or a list (an app that may run either way,
+    as Wayland and as X11, with a class for each)."""
+    cls = app.get("class") or []
+    return {x.lower() for x in ([cls] if isinstance(cls, str) else cls)}
+
+
+def matches(app, c):
+    want = classes(app)
+    return (c["class"].lower() in want or c["initialClass"].lower() in want) \
+        and not (app.get("title") and not re.search(app["title"], c["title"]))
+
+
+def siblings(app):
+    """Other apps (in any dock) whose windows look the same: instances of one app
+    open in more than one dock, or apps sharing a class."""
+    mine = classes(app)
+    return [a for d in read_config()["docks"] for a in d["apps"]
+            if a["id"] != app["id"] and classes(a) & mine]
+
+
+def released():
+    """Windows let go of (omext-dock release): no dock takes them, until brought back."""
+    return set(read_state().get("released", []))
+
+
+def set_released(addrs):
+    st = read_state()
+    st["released"] = sorted(addrs)
+    write_state(st)
+
+
+def released_window(app, clients):
+    """An app's window that was let go of (the app counts as running elsewhere)."""
+    free = released()
+    return next((c for c in clients if c["address"] in free and matches(app, c) and c["mapped"]), None)
+
+
+def window(app, clients):
+    """The app's window: the one it was docked with while it's there, else the
+    first that no sibling has as its own (never one let go of)."""
+    free = released()
+    found = [c for c in clients if matches(app, c) and c["mapped"] and c["address"] not in free]
+    if not found:
+        return None
+    wins = read_state().get("windows", {})
+    own = next((c for c in found if c["address"] == wins.get(app["id"])), None)
+    if own:
+        return own
+    taken = {wins.get(a["id"]) for a in siblings(app)}
+    return next((c for c in found if c["address"] not in taken), None)
+
+
+def remember(app_id, addr):
+    st = read_state()
+    st.setdefault("windows", {})[app_id] = addr
+    write_state(st)
+
+
+def dock_monitor(dock, monitors, docks=None):
+    """The dock's screen. Without it (undocked from it), the same edge of the
+    outermost screen that way, unless a dock there has that edge of its own; the
+    dock goes back when its screen does."""
+    want = dock.get("monitor")
+    m = next((m for m in monitors if want in (m["name"], m["description"])), None)
+    if m or not monitors:
+        return m
+    by_x = sorted(monitors, key=lambda m: m["x"])
+    m = by_x[-1] if dock["edge"] == "right" else by_x[0]
+    docks = docks if docks is not None else read_config()["docks"]
+    taken = any(d["id"] != dock["id"] and d["edge"] == dock["edge"]
+                and d.get("monitor") in (m["name"], m["description"]) for d in docks)
+    return None if taken else m
+
+
+def min_key(app_id, m):
+    return f"{app_id}@{m['name']}"  # per screen: the same app is narrower at a larger scale
+
+
+def needed_width(dock, m):
+    """The dock is never narrower than the widest minimum of its apps (learned when
+    each is placed), on this screen."""
+    known = read_state().get("minw", {})
+    return max([known.get(min_key(a["id"], m), 0) for a in dock["apps"]] + [0])
+
+
+def max_width(dock, m):
+    """The widest the dock gets: its own share of the screen (maxWidthPct), or 90%."""
+    lw = logical(m)[0]
+    pct = max(10, min(100, int(dock.get("maxWidthPct") or 90)))
+    return max(200, int(lw * pct / 100))
+
+
+def set_width(dock, m, px):
+    floor = max(200, needed_width(dock, m) if m else 0)
+    dock["width"] = max(floor, min(max_width(dock, m) if m else 10**6, int(px)))
+
+
+def dock_rect(dock, m):
+    """The dock's column: its edge of the screen, the full height below the bar, its
+    width up to its max width, and never narrower than an app of it can be."""
+    lw, lh = logical(m)
+    _, top, _, bottom = m["reserved"]
+    bar = bar_width(dock)  # a closed look that takes room: the dock opens beside it
+    w = min(int(dock.get("width", 420)), max_width(dock, m))
+    w = min(max(w, needed_width(dock, m)), int(lw) - bar)
+    x = m["x"] + bar if dock["edge"] == "left" else m["x"] + lw - w - bar
+    return [round(x), round(m["y"] + top), w, round(lh - top - bottom)]
+
+
+# Open, every dock has a bar with its apps' icons (and Open an app) on its edge,
+# as wide as its icons need (as omext.docks draws them).
+BAR_WIDTHS = {"small": 30, "large": 36}
+ICON_SIZES = ("small", "large")
+
+
+def look(dock):
+    """How the closed dock shows."""
+    got = dock.get("look", "hidden")
+    return got if got in LOOKS else "hidden"
+
+
+def icon_size(dock):
+    """The bar's icons: as set, else small but with the icons look (large ones)."""
+    got = dock.get("iconSize")
+    if got in ICON_SIZES:
+        return got
+    return "large" if dock.get("look") == "icons" else "small"
+
+
+def bar_width(dock):
+    if dock.get("look") == "slim" and icon_size(dock) == "large":
+        return 40  # its large icons sit further in, to be whole on screen
+    return BAR_WIDTHS[icon_size(dock)]
+
+
+def is_expanded(app):
+    return bool(app.get("expanded"))
+
+
+def is_single(dock):
+    """The dock's mode: one app open at a time ("single", the default), or any
+    number, each opened and closed on its own ("free")."""
+    return dock.get("mode", "single") != "free"
+
+
+def collapse_others(dock, keep):
+    """One app open at a time, in a single dock."""
+    if not is_single(dock):
+        return
+    for a in dock["apps"]:
+        if a is not keep:
+            a["expanded"] = False
+
+
+def default_app(dock):
+    """The favorite the dock opens on (when it starts, and when its last open app
+    closes): the one set, else the first favorite, else the first app."""
+    apps = [a for a in dock["apps"] if not a.get("separator")]
+    return next((a for a in apps if a["id"] == dock.get("default")), None) or (apps[0] if apps else None)
+
+
+def ensure_one(dock):
+    """A dock always has an app open: if none is, the default opens."""
+    d = default_app(dock)
+    if d and not any(is_expanded(a) for a in dock["apps"]):
+        d["expanded"] = True
+
+
+TITLEBAR_H = 30  # the title bar above each app, drawn by the shell (as Omarchy's on floating windows)
+
+
+def titlebar_h(dock):
+    return TITLEBAR_H
+
+
+def heights(dock, apps, total):
+    """Split total among the apps: equal shares, but an app that can't be shorter
+    (its minimum height, learned when placed, and its title bar) gets that, the
+    rest share what's left."""
+    known, bar = read_state().get("minh", {}), titlebar_h(dock)
+    mins = {a["id"]: known.get(f"{a['id']}@{dock['id']}", 0) + bar for a in apps}
+    fixed, rest = {}, list(apps)
+    while rest:
+        share = (total - sum(fixed.values())) // len(rest)
+        big = [a for a in rest if mins[a["id"]] > share]
+        if not big:
+            break
+        for a in big:
+            fixed[a["id"]] = mins[a["id"]]
+            rest.remove(a)
+    share = (total - sum(fixed.values())) // len(rest) if rest else 0
+    return {a["id"]: fixed.get(a["id"], max(0, share)) for a in apps}
+
+
+def ordered(dock, data=None):
+    """The dock's apps as they show (the bar, the windows top to bottom): in
+    their order."""
+    return list(dock["apps"])
+
+
+def layout(dock, rect, clients):
+    """Window rectangles for the dock's apps, top to bottom: the shown (expanded)
+    running apps share the dock's height; the others get none. Each app's share
+    starts with its title bar (drawn by the shell), the window under it."""
+    x, y, w, h = rect
+    shown = [a for a in dock["apps"] if window(a, clients) and is_expanded(a)]
+    sizes, bar = heights(dock, shown, h), titlebar_h(dock)
+    items, at = {}, y
+    for a in ordered(dock):  # top to bottom as the bar has them
+        item = {"window": None, "bar": None}
+        if a in shown:
+            if bar:
+                item["bar"] = [x, at, w, bar]
+            item["window"] = [x, at + bar, w, max(1, sizes[a["id"]] - bar)]  # no border while docked
+            at += sizes[a["id"]]
+        items[a["id"]] = item
+    out = [items[a["id"]] for a in dock["apps"]]
+    return out
+
+
+def option(name):
+    try:
+        got = json.loads(subprocess.check_output(["hyprctl", "getoption", name, "-j"], stderr=subprocess.DEVNULL))
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+    return next((got[k] for k in ("int", "custom") if k in got), None)
+
+
+# Docked windows carry this tag; the addon's window rule (hypr/docked.lua) takes
+# their border and animations while they do. A tag, not set_prop: clearing a
+# property again with 'unset' has crashed Hyprland.
+DOCKED_TAG = "omext-docked"
+# Docked windows drawn out of place: some 20 px too high, the top cut off under
+# the dock's bar, though Hyprland reports them where they belong. What does it:
+# Hyprland keeps an offset per floating window for while its workspace slides
+# in or out, so that a window reaching past the screen's edge slides all the way
+# out with it. It works that offset out only while the window's workspace is
+# sliding, and never again once the window has left it. A dock's hidden
+# workspace slides whenever Hyprland shows it (one of its windows asked for
+# attention: a notification clicked, a tray icon) and the dock hides it again;
+# a docked window is as tall as the screen, so with a shadow or border it
+# reaches past the edge by that much, and keeps that offset when it is next
+# shown in the dock. (Moving it to another workspace by hand only helps when
+# that workspace slides.)
+#
+# So: before a hidden workspace is hidden again its windows are made to fit
+# inside the screen (tucked; put back once it has slid away), and a window that
+# has the offset already is healed as it next shows: alone on a workspace of
+# its own, fitting the screen, that slides in and out without a frame drawn.
+# (2026-11)
+STALE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "omext-dock-stale"
+HEAL = "special:omext-heal"
+ROOM = 48  # px from the screen's edges: more than a shadow, border and titlebar reach
+
+
+def mark_stale(clients=None):
+    STALE.mkdir(parents=True, exist_ok=True)
+    for c in clients if clients is not None else hypr("clients"):
+        if DOCKED_TAG in c.get("tags", []):
+            (STALE / c["address"]).touch()
+
+
+def is_stale(addr):
+    return (STALE / addr).exists()
+
+
+def tucked(c, m):
+    """What makes window c fit inside screen m, with room around it."""
+    mw, mh = logical(m)
+    w, h = int(min(c["size"][0], mw - 2 * ROOM)), int(min(c["size"][1], mh - 2 * ROOM))
+    x = int(min(max(c["at"][0], m["x"] + ROOM), m["x"] + mw - ROOM - w))
+    y = int(min(max(c["at"][1], m["y"] + ROOM), m["y"] + mh - ROOM - h))
+    a = q("address:" + c["address"])
+    return [f"hl.dsp.window.resize({{ x = {w}, y = {h}, relative = false, window = {a} }})",
+            f"hl.dsp.window.move({{ x = {x}, y = {y}, relative = false, window = {a} }})"]
+
+
+def slide_time():
+    """Seconds a special workspace takes to slide away, and a little more."""
+    try:
+        tree = {a["name"]: a for a in hypr("animations")[0]}
+    except Exception:
+        return 1.0
+    for name in ("specialWorkspaceOut", "specialWorkspace", "workspaces", "global"):
+        a = tree.get(name)
+        if a and a.get("overridden"):
+            return (a.get("speed", 6) / 10 if a.get("enabled") else 0) + 0.4
+    return 1.0
+
+
+def heal(addrs, clients):
+    """Windows drawn out of place (see STALE) are set right: on a workspace of
+    their own, inside the screen, that slides in and out in one go. They are
+    left there: place() puts them where they belong."""
+    by = {c["address"]: c for c in clients}
+    addrs = [a for a in addrs if a in by]
+    if not addrs:
+        return
+    monitors = hypr("monitors")
+    m = next((x for x in monitors if x.get("focused")), monitors[0])  # where a special workspace shows
+    active = hypr("activewindow").get("address")
+    log_event(f"heal {' '.join(addrs)}")
+    out, put, back = [], [], []
+    for a in addrs:
+        c, qa = by[a], q("address:" + a)
+        if c.get("pinned"):
+            out.append(f"hl.dsp.window.pin({{ action = 'off', window = {qa} }})")
+        out.append(f"hl.dsp.window.move({{ workspace = {q(HEAL)}, follow = false, window = {qa} }})")
+        # No smaller than it has to be: an app takes a moment to draw itself at
+        # another size, and would show at the wrong one meanwhile.
+        put += tucked(c, m)
+        back.append(f"hl.dsp.window.resize({{ x = {c['size'][0]}, y = {c['size'][1]}, relative = false, window = {qa} }})")
+    dispatch(*out)
+    dispatch(f"hl.dsp.workspace.move({{ workspace = {q(HEAL)}, monitor = {q(m['name'])} }})", *put)
+    time.sleep(0.1)  # sized before it slides
+    name = q(HEAL.split(":", 1)[1])
+    dispatch(f"hl.dsp.workspace.toggle_special({name})", f"hl.dsp.workspace.toggle_special({name})")
+    time.sleep(0.1)
+    dispatch(*back)  # its size again, drawn before it shows
+    time.sleep(0.2)
+    for a in addrs:
+        (STALE / a).unlink(missing_ok=True)
+    if active and hypr("activewindow").get("address") != active:
+        focus_still(active)
+DOCKED = "hl.dsp.window.tag({{ tag = '{v}" + DOCKED_TAG + "', window = {a} }})"
+
+
+# A new window opening on a workspace with a maximized (or fullscreen) one ends
+# that: Hyprland gives the workspace's fullscreen up for it. A docked app's new
+# window is only passing through (into its dock), so what it ended is put back:
+# the windows maximized or fullscreen when the app was started, until it's in.
+FULLSCREEN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "omext-dock-fullscreen.json"
+
+
+def note_fullscreen(app):
+    try:
+        was = {c["address"]: c["fullscreen"] for c in hypr("clients")
+               if c.get("fullscreen") and DOCKED_TAG not in c.get("tags", [])}
+        if was:
+            FULLSCREEN.write_text(json.dumps({"t": time.time(), "app": app["id"], "windows": was}))
+        else:
+            FULLSCREEN.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def restore_fullscreen(c):
+    """Once the started app's window c is in its dock: put back what it ended
+    (see note_fullscreen). Once only."""
+    try:
+        noted = json.loads(FULLSCREEN.read_text())
+    except (OSError, ValueError):
+        return
+    if time.time() - noted.get("t", 0) > 60:
+        FULLSCREEN.unlink(missing_ok=True)
+        return
+    started = next((a for d in read_config()["docks"] for a in d["apps"] if a["id"] == noted.get("app")), None)
+    if not started or not matches(started, c):
+        return
+    FULLSCREEN.unlink(missing_ok=True)
+    time.sleep(0.1)  # the window out first
+    now = {c["address"]: c for c in hypr("clients")}
+    exprs = []
+    for addr, mode in noted.get("windows", {}).items():
+        c = now.get(addr)
+        if c and not c.get("fullscreen"):
+            log_event(f"fullscreen back {addr} {c['class'][:24]} mode {mode}")
+            exprs.append(f"hl.dsp.window.fullscreen({{ mode = {q('maximized' if mode == 1 else 'fullscreen')}, "
+                         f"action = 'set', window = {q('address:' + addr)} }})")
+    if exprs:
+        dispatch(*exprs)
+
+
+def hide_window(c, dock=None):
+    """Into the dock's hidden workspace, on the dock's screen."""
+    log_event(f"hide {c['address']} {c['class'][:24]} from ws {c['workspace']['name']} at {c['at']}")
+    monitors = hypr("monitors")
+    m = (dock_monitor(dock, monitors) if dock else None) \
+        or next((x for x in monitors if x["id"] == c["monitor"]), monitors[0])
+    target = hidden_of(dock)
+    # Docked windows appear and go without animating, where they are.
+    a = q("address:" + c["address"])
+    exprs = [DOCKED.format(v="+", a=a)]
+    if c.get("pinned"):
+        exprs.append(f"hl.dsp.window.pin({{ action = 'off', window = {a} }})")
+    if c["workspace"]["name"] != target:
+        exprs.append(f"hl.dsp.window.move({{ workspace = {q(target)}, follow = false, window = {a} }})")
+    dispatch(*exprs)
+    # Made just now on whichever screen had focus: over to the dock's.
+    where = next((w["monitor"] for w in hypr("workspaces") if w["name"] == target), m["name"])
+    if where != m["name"]:
+        dispatch(f"hl.dsp.workspace.move({{ workspace = {q(target)}, monitor = {q(m['name'])} }})")
+    restore_fullscreen(c)
+
+
+def place(dock, data_clients=None, quick=False, again=True):
+    """Put the open dock's expanded apps in place and hide the collapsed ones."""
+    log_event(f"place {dock['id']}{' quick' if quick else ''}")
+    monitors = hypr("monitors")
+    m = dock_monitor(dock, monitors)
+    if not m:
+        return
+    clients = data_clients if data_clients is not None else hypr("clients")
+    rect = dock_rect(dock, m)
+    ws = m["activeWorkspace"]["name"]
+    if not quick and STALE.exists():
+        ill = [c["address"] for app, item in zip(dock["apps"], layout(dock, rect, clients)) if item["window"]
+               for c in [window(app, clients)] if c and is_stale(c["address"])]
+        if ill:
+            heal(ill, clients)
+            clients = hypr("clients")
+    wanted = {}  # address -> the rectangle asked for
+    for app, item in zip(dock["apps"], layout(dock, rect, clients)):
+        c = window(app, clients)
+        if not c:
+            continue
+        remember(app["id"], c["address"])
+        if not item["window"]:
+            hide_window(c, dock)
+            continue
+        a = q("address:" + c["address"])
+        x, y, w, h = item["window"]
+        exprs = [DOCKED.format(v="+", a=a)]
+        if c.get("fullscreen"):
+            exprs.append(f"hl.dsp.window.fullscreen({{ mode = 'maximized', action = 'unset', window = {a} }})")
+        if not c["floating"]:
+            exprs.append(f"hl.dsp.window.float({{ action = 'on', window = {a} }})")
+        # Sized and put in place first, then shown: a hidden window waits where
+        # it was last, and would show there for a frame before moving. And again
+        # once shown: the hidden workspace may be on another screen, and a window
+        # carried from one screen to another is moved along with it.
+        put = [f"hl.dsp.window.resize({{ x = {w}, y = {h}, relative = false, window = {a} }})",
+               f"hl.dsp.window.move({{ x = {x}, y = {y}, relative = false, window = {a} }})"]
+        exprs += put
+        if c["workspace"]["name"] != ws and not (c.get("pinned") and c["monitor"] == m["id"]):
+            if c.get("pinned"):
+                exprs.append(f"hl.dsp.window.pin({{ action = 'off', window = {a} }})")
+            exprs.append(f"hl.dsp.window.move({{ workspace = {q(ws)}, follow = false, window = {a} }})")
+            c["pinned"] = False
+            exprs += put
+        if not c.get("pinned"):
+            exprs.append(f"hl.dsp.window.pin({{ action = 'on', window = {a} }})")
+        exprs.append(f"hl.dsp.window.alter_zorder({{ mode = 'top', window = {a} }})")
+        dispatch(*exprs)
+        wanted[c["address"]] = (item["window"], app["id"])
+        restore_fullscreen(c)
+    if quick:
+        return
+    # Omarchy tags windows arriving on a floating workspace for its titlebar,
+    # a moment after they land: the dock's bar is theirs instead. (They keep
+    # no_anim while docked, also for the next time they are hidden.) And an app
+    # with a minimum width wider than the dock stays inside the screen.
+    # An app that stayed wider than asked can't be narrower: the dock learns that
+    # and widens to fit it while it's open.
+    time.sleep(0.15)
+    exprs, learned, learned_h = [], {}, {}
+    for c in hypr("clients"):
+        a, got = q("address:" + c["address"]), wanted.get(c["address"])
+        if not got:
+            continue
+        want, app_id = got
+        exprs.append(f"hl.dsp.window.tag({{ tag = '-{TITLEBAR_TAG}', window = {a} }})")
+        if c["size"][1] > want[3] + 1:  # can't be that short: the others make room
+            learned_h[f"{app_id}@{dock['id']}"] = c["size"][1]
+        if c["size"][0] > want[2]:
+            learned[min_key(app_id, m)] = c["size"][0]
+            if dock["edge"] == "right":
+                x = rect[0] + rect[2] - c["size"][0] - (want[0] - rect[0])
+                exprs.append(f"hl.dsp.window.move({{ x = {x}, y = {want[1]}, relative = false, window = {a} }})")
+    dispatch(*exprs)
+    if learned or learned_h:
+        st, grew = read_state(), False
+        for key, got in (("minw", learned), ("minh", learned_h)):
+            known = st.setdefault(key, {})
+            if any(known.get(k, 0) < v for k, v in got.items()):
+                known.update({k: max(known.get(k, 0), v) for k, v in got.items()})
+                grew = True
+        if grew:
+            write_state(st)
+            if again:
+                place(dock, again=False)
+                refresh_shell()
+
+
+def close(dock, clients=None):
+    clients = clients if clients is not None else hypr("clients")
+    mine = set()
+    for app in dock["apps"]:
+        c = window(app, clients)
+        if c:
+            mine.add(c["address"])
+            hide_window(c, dock)
+    # A hidden app would keep focus: give it back to the window used before.
+    if hypr("activewindow").get("address") in mine:
+        visible = {m["activeWorkspace"]["name"] for m in hypr("monitors")}
+        back = sorted((c for c in clients if c["address"] not in mine and c["workspace"]["name"] in visible
+                       and c["mapped"]), key=lambda c: c.get("focusHistoryID", 99))
+        if back:
+            focus_still(back[0]["address"])
+
+
+def focus_still(addr):
+    """Focus a window without the pointer jumping to it."""
+    out = subprocess.run(["hyprctl", "getoption", "cursor:no_warps"], capture_output=True, text=True).stdout
+    saved = "true" if re.search(r"(bool|int): (true|1)\b", out) else "false"
+    subprocess.run(["hyprctl", "eval", "hl.config({ cursor = { no_warps = true } })"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    dispatch(f"hl.dsp.focus({{ window = {q('address:' + addr)} }})")
+    subprocess.run(["hyprctl", "eval", f"hl.config({{ cursor = {{ no_warps = {saved} }} }})"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def runnable(cmd):
+    """uwsm-app only takes desktop ids it calls valid: none with a space (as
+    "Microsoft Teams.desktop"). Those run their Exec line instead."""
+    if len(cmd) == 3 and cmd[:2] == ["uwsm-app", "--"] and cmd[2].endswith(".desktop") and re.search(r"\s", cmd[2]):
+        entry = next((e for e in desktop_entries() if e["id"] == cmd[2]), None)
+        if entry and entry.get("Exec"):
+            argv = [a for a in shlex.split(entry["Exec"]) if not re.fullmatch(r"%[a-zA-Z]", a)]
+            return ["uwsm-app", "--"] + argv
+    return cmd
+
+
+def launch(app):
+    cmd = app.get("launch") or []
+    if not cmd:
+        return
+    # One window only (not multi): never started again while one is there, in
+    # any state (unmapped for a moment, say). A browser app would open a second.
+    # (A window whose process has ended is only closing: not one.)
+    if not app.get("multi") and any(matches(app, c) and pid_alive(c["pid"]) for c in hypr("clients")):
+        log_event(f"launch {app['id']}: has a window already, not started again")
+        return
+    (QUIT / app["id"]).unlink(missing_ok=True)
+    LAUNCHING.mkdir(parents=True, exist_ok=True)
+    (LAUNCHING / app["id"]).touch()
+    note_fullscreen(app)
+    if cmd[0] != "uwsm-app":
+        cmd = ["uwsm-app", "--"] + cmd
+    cmd = runnable(cmd)
+    subprocess.Popen(["setsid", "-f"] + cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     stdin=subprocess.DEVNULL)
+
+
+# --- desktop entries ----------------------------------------------------------
+
+# The XDG data dirs' applications/, the user's first, and flatpak's (in case
+# the session's XDG_DATA_DIRS leaves them out).
+_data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+_data_dirs = [Path(d) for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":") if d]
+DESKTOP_DIRS = list(dict.fromkeys(
+    [_data_home / "applications", _data_home / "flatpak/exports/share/applications"]
+    + [d / "applications" for d in _data_dirs]
+    + [Path("/var/lib/flatpak/exports/share/applications")]))
+
+
+def desktop_entries():
+    out, seen = [], set()
+    for d in DESKTOP_DIRS:
+        for f in sorted(d.glob("*.desktop")) if d.is_dir() else []:
+            if f.name in seen:
+                continue
+            seen.add(f.name)
+            entry, section = {}, None
+            try:
+                for line in f.read_text(errors="replace").splitlines():
+                    if line.startswith("["):
+                        section = line.strip()
+                    elif section == "[Desktop Entry]" and "=" in line:
+                        k, v = line.split("=", 1)
+                        entry.setdefault(k.strip(), v.strip())
+            except OSError:
+                continue
+            if entry.get("Hidden") == "true" or entry.get("Type", "Application") != "Application":
+                continue
+            entry["id"] = f.name
+            out.append(entry)
+    return out
+
+
+def desktop_class(entry):
+    stem = entry["id"][:-8]
+    if stem.startswith(("msedge-", "chrome-")):
+        return stem
+    return entry.get("StartupWMClass") or stem
+
+
+def icon_for_class(cls):
+    low = cls.lower()
+    e = next((e for e in desktop_entries()
+              if e["id"][:-8].lower() == low or e.get("StartupWMClass", "").lower() == low), None)
+    return (e or {}).get("Icon", "")
+
+
+# --- commands -----------------------------------------------------------------
+
+def cmd_list():
+    data, st = read_config(), read_state()
+    monitors, clients = hypr("monitors"), hypr("clients")
+    counts, opened = st.get("unread", {}), set(st.get("open", []))
+    out = []
+    for dock in data["docks"]:
+        m = dock_monitor(dock, monitors)
+        if not m:
+            continue
+        rect = dock_rect(dock, m)
+        items = dict(zip((a["id"] for a in dock["apps"]), layout(dock, rect, clients)))
+        apps = []
+        for app in ordered(dock, data):
+            item = items[app["id"]]
+            c = window(app, clients)
+            unread = counts.get(app["id"], 0)
+            if c and not app.get("alertsOnly"):
+                found = re.search(r"(?:^|\s-\s)\((\d+)\+?\)\s", c["title"])
+                unread = max(unread, int(found.group(1)) if found else 0)
+            apps.append({"id": app["id"], "name": app.get("name", app["id"]),
+                         "appName": app.get("name", app["id"]),
+                         "multi": bool(app.get("multi")), "icon": app.get("icon", ""),
+                         "expanded": is_expanded(app),
+                         "favorite": is_favorite(app), "separator": bool(app.get("separator")),
+                         "startOnLoad": starts_on_load(app), "keepAlive": kept_alive(app), "pinned": is_pinned(app),
+                         "running": c is not None, "address": c["address"] if c else "",
+                         "unread": unread, "window": item["window"], "bar": item["bar"],
+                         "title": c["title"] if c else ""})
+        out.append({"id": dock["id"], "edge": dock["edge"], "screen": m["name"], "monitor": m["description"],
+                    "screenRect": [m["x"], m["y"], round(logical(m)[0]), round(logical(m)[1])],
+                    "rect": rect, "width": rect[2], "minWidth": needed_width(dock, m),
+                    "maxWidth": max_width(dock, m), "maxWidthPct": int(dock.get("maxWidthPct") or 0),
+                    "dockWidth": int(dock.get("width", 420)),
+                    "keepOpen": bool(dock.get("keepOpen")), "mode": "single" if is_single(dock) else "free",
+                    "look": look(dock), "iconSize": icon_size(dock),
+                    "barWidth": bar_width(dock),
+                    "default": (default_app(dock) or {}).get("id", ""),
+                    "open": (dock["id"] in opened or bool(dock.get("keepOpen"))) and not dock.get("off"),
+                    "off": bool(dock.get("off")),
+                    "apps": apps})
+    style = data.get("iconStyle") if data.get("iconStyle") in ICON_STYLES else "color"
+    print(json.dumps({"docks": out, "iconStyle": style,
+                      "separatorLook": "space" if data.get("separatorLook") == "space" else "line"},
+                     ensure_ascii=False))
+
+
+def cmd_open(args, on=True):
+    if not args:
+        die("needs a dock id")
+    dock = find_dock(read_config(), args[0])
+    set_open(dock["id"], on)
+    if on:
+        place(dock)
+    elif not dock.get("keepOpen"):
+        close(dock)
+    refresh_shell()
+
+
+def cmd_toggle(args):
+    if not args:
+        die("toggle needs a dock id")
+    cmd_open(args, not is_open(args[0]))
+
+
+def cmd_add_separator(args):
+    """A line between the icons on a dock's bar, last on it: dragged to its
+    place and removed like an app's icon. One of the dock's apps in the config
+    ("separator": true), that is no app: nothing starts it, no window is its."""
+    if len(args) < 1:
+        die("add-separator needs a dock")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        taken = {a["id"] for d in data["docks"] for a in d["apps"]}
+        dock["apps"].append({"id": unique("separator", taken), "name": "Separator", "separator": True,
+                             "class": "omext-dock-separator", "launch": [], "expanded": False,
+                             "startOnLoad": False, "keepAlive": False})
+    refresh_shell()
+
+
+def cmd_expand(args):
+    if len(args) < 2:
+        die("expand needs a dock and an app")
+    monitors = hypr("monitors")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        app = find_app(dock, args[1])
+        if app.get("separator"):
+            return
+        want = args[2] if len(args) > 2 else "toggle"
+        if want == "toggle" and not window(app, hypr("clients")):
+            want = "on"  # not running: a click starts it, never collapses it
+        app["expanded"] = (not app.get("expanded")) if want == "toggle" else want == "on"
+        if app["expanded"]:
+            collapse_others(dock, app)
+        elif not any(is_expanded(a) for a in dock["apps"]):
+            if is_single(dock) or app is default_app(dock):
+                app["expanded"] = True  # the last open app stays open
+            else:
+                ensure_one(dock)  # closing the last one opens the default
+                d = default_app(dock)
+                if d and not window(d, hypr("clients")):
+                    launch(d)
+    if is_expanded(app) and not window(app, hypr("clients")):
+        back = released_window(app, hypr("clients"))
+        if back:  # let go of earlier: brought back in, not started again
+            set_released(released() - {back["address"]})
+            remember(app["id"], back["address"])
+            if not (is_open(dock["id"]) or dock.get("keepOpen")):
+                hide_window(back, dock)  # into the closed dock, to show when it opens
+        else:
+            launch(app)  # placed when its window opens (omext-dock watch)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+        # The app opened takes focus: the one that had it may be hidden now, and
+        # focus falling outside the dock would close it.
+        c = window(app, hypr("clients")) if is_expanded(app) else None
+        if c:
+            focus_still(c["address"])
+    refresh_shell()
+
+
+def flag(args, name):
+    if name in args:
+        args.remove(name)
+        return True
+    return False
+
+
+def value(args, name):
+    if name in args:
+        i = args.index(name)
+        if i + 1 < len(args):
+            v = args[i + 1]
+            del args[i:i + 2]
+            return v
+        die(f"{name} needs a value")
+    return None
+
+
+def cmd_add(args):
+    favorite = flag(args, "--favorite")
+    addr = value(args, "--window")
+    group = value(args, "--group")  # into a group (none: no group)
+    before, after = value(args, "--before"), value(args, "--after")  # next to another app
+    if not args or (not addr and len(args) < 2):
+        die("add needs a dock and a desktop id (or --window ADDR)")
+    if addr:
+        if not addr.startswith("0x"):
+            addr = "0x" + addr
+        c = next((c for c in hypr("clients") if c["address"] == addr), None)
+        if not c:
+            die(f"no window {addr}")
+        cls = c["class"] or c["initialClass"]
+        entry = next((e for e in desktop_entries() if desktop_class(e).lower() == cls.lower()), None)
+        app = {"name": (entry or {}).get("Name") or c["title"] or cls, "class": cls,
+               "launch": ["uwsm-app", "--", entry["id"]] if entry else [],
+               "icon": (entry or {}).get("Icon") or icon_for_class(cls)}
+    else:
+        entry = next((e for e in desktop_entries() if e["id"] == args[1]), None)
+        if not entry:
+            die(f"no installed app '{args[1]}'")
+        app = {"name": entry.get("Name", entry["id"][:-8]), "class": desktop_class(entry),
+               "launch": ["uwsm-app", "--", entry["id"]], "icon": entry.get("Icon", "")}
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        taken = {a["id"] for d in data["docks"] for a in d["apps"]}
+        app.update({"id": unique(slug(app["name"]), taken), "expanded": True,
+                    "favorite": favorite, "startOnLoad": False, "keepAlive": False})
+        if group and group != "none":
+            app["group"] = group
+        near = next((a for a in dock["apps"] if a["id"] in (before, after)), None)
+        if near:
+            dock["apps"].insert(dock["apps"].index(near) + (near["id"] == after), app)
+        else:
+            dock["apps"].append(app)
+        collapse_others(dock, app)
+    if addr:
+        set_released(released() - {addr})
+        remember(app["id"], addr)
+        if not (is_open(dock["id"]) or dock.get("keepOpen")):
+            hide_window(c, dock)  # in the dock now (shown when it opens)
+    elif not window(app, hypr("clients")):
+        launch(app)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+    print(app["id"])
+
+
+def locate(data, app_id):
+    """(dock, app) for an app id, in whichever dock it is."""
+    for d in data["docks"]:
+        for a in d["apps"]:
+            if a["id"] == app_id:
+                return d, a
+    die(f"no app '{app_id}'")
+
+
+def show_in(dock_id, app_id, src_id=None):
+    """After an app came to a dock: start it if it must, and lay out the docks."""
+    data = read_config()
+    dock = find_dock(data, dock_id)
+    app = find_app(dock, app_id)
+    c = window(app, hypr("clients"))
+    if not c:
+        launch(app)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+        if c:
+            focus_still(c["address"])
+    elif c:
+        hide_window(c, dock)
+    if src_id and src_id != dock_id:
+        src = find_dock(data, src_id)
+        if is_open(src["id"]) or src.get("keepOpen"):
+            place(src)
+    refresh_shell()
+
+
+def cmd_take(args):
+    """A favorite opened from another dock: it moves to this one (its window with it)."""
+    if len(args) < 2:
+        die("take needs a dock and an app")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        src, app = locate(data, args[1])
+        if src is not dock:
+            src["apps"].remove(app)
+            dock["apps"].append(app)
+            ensure_one(src)
+        app["expanded"] = True
+        collapse_others(dock, app)
+    show_in(dock["id"], app["id"], src["id"])
+
+
+def relocate(data, app_id, dock_id, where="end", other=None, group=None, favorite=False):
+    """An app put in a dock (its own or another) at a place: before or after
+    another app there, or last; into a group too (a name, "" for none, None to
+    keep it). Returns the dock it came from."""
+    dock = find_dock(data, dock_id)
+    src, app = locate(data, app_id)
+    if other == app["id"]:
+        return src
+    src["apps"].remove(app)
+    apps = dock["apps"]
+    if other and where in ("before", "after"):
+        o = find_app(dock, other)
+        apps.insert(apps.index(o) + (where == "after"), app)
+    else:
+        apps.append(app)
+    if group is not None:
+        if group:
+            app["group"] = group
+        else:
+            app.pop("group", None)
+    if favorite:
+        app["favorite"] = True  # an open app, made a favorite where it went
+    if src is not dock:
+        if src.get("default") == app["id"]:
+            src.pop("default", None)  # the dock's first favorite now (write_config)
+        if dock.get("default") == app["id"]:
+            dock.pop("default", None)
+        if is_expanded(app):
+            collapse_others(dock, app) if is_open(dock["id"]) else app.update(expanded=False)
+        ensure_one(src)
+    return src
+
+
+def after_relocate(dock_ids, app_ids):
+    """The docks the apps left or came to laid out again; in a closed one, the
+    moved apps' windows hidden."""
+    data = read_config()
+    clients = hypr("clients")
+    for dock in data["docks"]:
+        if dock["id"] not in dock_ids:
+            continue
+        if is_open(dock["id"]) or dock.get("keepOpen"):
+            place(dock, clients)
+        else:
+            for app in dock["apps"]:
+                c = window(app, clients) if app["id"] in app_ids else None
+                if c:
+                    hide_window(c, dock)
+    refresh_shell()
+
+
+def cmd_relocate(args):
+    """relocate <app> <dock> [before|after <other>|end] [group <name>|none] [favorite]"""
+    if len(args) < 2:
+        die("relocate needs an app and a dock")
+    app_id, dock_id, rest = args[0], args[1], args[2:]
+    where, other, group, fav = "end", None, None, False
+    while rest:
+        if rest[0] in ("before", "after") and len(rest) > 1:
+            where, other, rest = rest[0], rest[1], rest[2:]
+        elif rest[0] == "end":
+            where, rest = "end", rest[1:]
+        elif rest[0] == "favorite":
+            fav, rest = True, rest[1:]
+        elif rest[0] == "group" and len(rest) > 1:
+            group, rest = ("" if rest[1] == "none" else rest[1]), rest[2:]
+        else:
+            die(f"relocate: what is '{rest[0]}'?")
+    with Config() as data:
+        src = relocate(data, app_id, dock_id, where, other, group, fav)
+    after_relocate({src["id"], dock_id}, {app_id})
+
+
+def cmd_dock_power(args):
+    """dock <dock> on|off: a dock turned off is gone from its edge (no bar, no
+    room taken) and leaves its apps be: their windows let go, as normal floating
+    windows; nothing started or kept alive. Its apps stay its own, for when it's
+    on again (or to be moved to another dock)."""
+    if len(args) < 2 or args[1] not in ("on", "off"):
+        die("dock needs a dock and on|off")
+    clients = hypr("clients")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        if args[1] == "on":
+            dock.pop("off", None)
+        else:
+            if not any(d is not dock and not d.get("off") for d in data["docks"]):
+                die("the last dock that's on stays on (to turn the docks off: omext-dock disable)")
+            dock["off"] = True
+            for app in dock["apps"]:
+                app["expanded"] = False
+    if args[1] == "off":
+        let_go(dock, clients)
+    else:
+        with Config() as data:
+            ensure_one(find_dock(data, args[0]))
+    # The send-to-dock buttons on floating title bars: only the docks that are on
+    # (hypr/titlebar.lua, run on each config load).
+    subprocess.run(["hyprctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    refresh_shell()
+
+
+def let_go(dock, clients):
+    """Every window of a dock's apps let go: normal floating windows."""
+    st = read_state()
+    st["open"] = [i for i in st.get("open", []) if i != dock["id"]]
+    for app in dock["apps"]:
+        c = window(app, clients)
+        if not c:
+            continue
+        set_released(released() | {c["address"]})
+        if st.get("windows", {}).get(app["id"]) == c["address"]:
+            del st["windows"][app["id"]]
+        float_window(c)
+    write_state(st)
+
+
+def cmd_release_all():
+    """Every dock's windows let go (before the docks addon is turned off, so
+    none is left hidden)."""
+    clients = hypr("clients")
+    for dock in read_config()["docks"]:
+        let_go(dock, clients)
+    refresh_shell()
+
+
+def quiet(*cmd):
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def cmd_disable():
+    """The docks off, until enabled: windows let go (none left hidden), the
+    watcher stopped, the shell plugin off, the titlebar buttons gone."""
+    cmd_release_all()
+    STATE.mkdir(parents=True, exist_ok=True)
+    DISABLED.touch()
+    quiet("systemctl", "--user", "stop", SERVICE)
+    quiet("omarchy", "plugin", "disable", PLUGIN)
+    quiet("hyprctl", "reload")
+
+
+def cmd_enable():
+    DISABLED.unlink(missing_ok=True)
+    quiet("omarchy-shell", "shell", "rescanPlugins")
+    quiet("omarchy", "plugin", "enable", PLUGIN)
+    quiet("systemctl", "--user", "restart", SERVICE)
+    quiet("hyprctl", "reload")
+
+
+def cmd_instance(args):
+    """One more of an app that may run more than once (multi), in this dock: a
+    new window of its own, not a favorite until made one."""
+    if len(args) < 2:
+        die("instance needs a dock and an app")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        _, base = locate(data, args[1])
+        taken = {a["id"] for d in data["docks"] for a in d["apps"]}
+        app = {k: base[k] for k in ("name", "class", "title", "launch", "icon", "alertsOnly") if k in base}
+        app.update({"id": unique(base["id"], taken), "multi": True, "expanded": True,
+                    "favorite": False, "startOnLoad": False, "keepAlive": False})
+        if base.get("group"):
+            app["group"] = base["group"]
+        dock["apps"].append(app)
+        collapse_others(dock, app)
+    launch(app)
+    show_in(dock["id"], app["id"])
+    print(app["id"])
+
+
+def cmd_default(args):
+    """The favorite the dock opens on: when it starts, and when its last open
+    app closes."""
+    if len(args) < 2:
+        die("default needs a dock and an app")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        app = find_app(dock, args[1])
+        app["favorite"] = True
+        dock["default"] = app["id"]
+    refresh_shell()
+
+
+LOOKS = ("hidden", "line", "bar", "slim", "icons")
+
+
+def cmd_look(args):
+    """How a closed dock shows: hidden (an invisible strip), a dimmed line, a bar
+    that takes its room, or a wider bar of its apps' icons (also taking room)."""
+    if len(args) < 2 or args[1] not in LOOKS:
+        die("look needs a dock and " + "|".join(LOOKS))
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        dock["iconSize"] = icon_size(dock)  # kept as it is, whatever the look
+        dock["look"] = args[1]
+    refresh_shell()
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        time.sleep(0.3)  # the shell's new room first
+        place(dock)
+
+
+def cmd_icon_size(args):
+    """The bar's icons: small (round, on a slim bar) or large."""
+    if len(args) < 2 or args[1] not in ICON_SIZES:
+        die("icon-size needs a dock and " + "|".join(ICON_SIZES))
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        dock["iconSize"] = args[1]
+    refresh_shell()
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        time.sleep(0.3)
+        place(dock)
+
+
+ICON_STYLES = ("color", "mono", "mixed")
+
+
+def cmd_icon_style(args):
+    """The docks' icons (all of them, one setting) in their own colours, monochrome
+    (in the theme's text colour), or mixed: monochrome for pinned apps not
+    running, colour for the rest."""
+    if not args or args[-1] not in ICON_STYLES:
+        die("icon-style needs " + "|".join(ICON_STYLES))
+    with Config() as data:
+        for dock in data["docks"]:
+            dock.pop("iconStyle", None)  # once per dock: now for all
+        if args[-1] == "color":
+            data.pop("iconStyle", None)
+        else:
+            data["iconStyle"] = args[-1]
+    refresh_shell()
+
+
+def cmd_separator_look(args):
+    """The bars' separators (all of them, one setting): a line, or just a space."""
+    if not args or args[-1] not in ("line", "space"):
+        die("separator-look needs line|space")
+    with Config() as data:
+        if args[-1] == "line":
+            data.pop("separatorLook", None)
+        else:
+            data["separatorLook"] = "space"
+    refresh_shell()
+
+
+def cmd_mode(args):
+    if len(args) < 2 or args[1] not in ("single", "free"):
+        die("mode needs a dock and single|free")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        dock["mode"] = args[1]
+        # Single again: the first open app stays open.
+        first = next((a for a in dock["apps"] if is_expanded(a)), None)
+        collapse_others(dock, first)
+        ensure_one(dock)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+
+
+def cmd_move(args):
+    """Reorder a dock's apps. The bar shows the running ones, so up and down go
+    past the next running app (not a stopped one between, which you don't see)."""
+    if len(args) < 3 or args[2] not in ("up", "down", "before", "after", "end") or (args[2] in ("before", "after") and len(args) < 4):
+        die("move needs a dock, an app and up|down|before <other>|after <other>|end")
+    clients = hypr("clients")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        apps = dock["apps"]
+        app = find_app(dock, args[1])
+        if args[2] in ("up", "down"):
+            running = [a for a in apps if a is app or window(a, clients)]
+            k = running.index(app) + (-1 if args[2] == "up" else 1)
+            if not 0 <= k < len(running):
+                return
+            other = running[k]
+            apps.remove(app)
+            j = apps.index(other)
+            apps.insert(j if args[2] == "up" else j + 1, app)
+        elif args[2] == "end":
+            apps.remove(app)
+            apps.append(app)
+        else:
+            other = find_app(dock, args[3])
+            if other is app:
+                return
+            apps.remove(app)
+            apps.insert(apps.index(other) + (args[2] == "after"), app)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+
+
+def cmd_remove(args):
+    if len(args) < 2:
+        die("remove needs a dock and an app")
+    clients = hypr("clients")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        app = find_app(dock, args[1])
+        dock["apps"].remove(app)
+        ensure_one(dock)
+    c = window(app, clients)
+    if c:
+        # Back to a normal window on the workspace in front.
+        a = q("address:" + c["address"])
+        exprs = [DOCKED.format(v="-", a=a)]
+        if c.get("pinned"):
+            exprs.append(f"hl.dsp.window.pin({{ action = 'off', window = {a} }})")
+        if is_hidden(c["workspace"]["name"]):
+            ws = next((m["activeWorkspace"]["name"] for m in hypr("monitors") if m["focused"]), "1")
+            exprs.append(f"hl.dsp.window.move({{ workspace = {q(ws)}, follow = false, window = {a} }})")
+        dispatch(*exprs)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+
+
+def cmd_back(args):
+    """A dock's app that is out of its dock (let go of, or placed by a layout)
+    goes back in, without the dock opening on it: hidden with the dock's other
+    apps, or in its place when the dock is open. Exit status 1, and nothing
+    done, when no dock has an app that takes the window, or the app has another
+    window in the dock already."""
+    addr = value(args, "--window") or (args[0] if args else None)
+    if not addr:
+        die("back needs --window ADDR")
+    if not addr.startswith("0x"):
+        addr = "0x" + addr
+    clients = hypr("clients")
+    c = next((x for x in clients if x["address"] == addr), None)
+    if not c:
+        die(f"no window {addr}")
+    found = next(((d, a) for d in read_config()["docks"] if not d.get("off") for a in d["apps"] if matches(a, c)), None)
+    if not found:
+        sys.exit(1)
+    dock, app = found
+    old = window(app, clients)
+    if old and old["address"] != addr and not app.get("multi"):
+        sys.exit(1)
+    set_released(released() - {addr})
+    remember(app["id"], addr)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    else:
+        hide_window(c, dock)
+    refresh_shell()
+
+
+def cmd_send(args):
+    """A window into a dock: that one (--dock ID), or the dock on that edge (--edge left|right; the one on
+    the window's screen where there are more), else its app's own dock, else the
+    dock on the window's screen nearest it. An app in another dock moves along
+    to this one. The dock opens on it."""
+    quiet = flag(args, "--quiet")  # a closed dock stays closed: the window goes in hidden
+    edge = value(args, "--edge")
+    wanted = value(args, "--dock")
+    addr = value(args, "--window") or (args[0] if args else None)
+    if not addr or (edge and edge not in EDGES):
+        die("send needs --window ADDR (and maybe --edge left|right)")
+    if not addr.startswith("0x"):
+        addr = "0x" + addr
+    clients = hypr("clients")
+    c = next((x for x in clients if x["address"] == addr), None)
+    if not c:
+        die(f"no window {addr}")
+    set_released(released() - {addr})
+    own, app = owner(clients, addr)
+    monitors, docks = hypr("monitors"), [d for d in read_config()["docks"] if not d.get("off")]
+    here = [d for d in docks if (dock_monitor(d, monitors, docks) or {}).get("id") == c["monitor"]]
+    if wanted:
+        dock = next((d for d in docks if d["id"] == wanted), None)
+        if not dock:
+            die(f"no dock {wanted} (that's on)")
+    elif edge:
+        on_edge = [d for d in docks if d["edge"] == edge]
+        if not on_edge:
+            die(f"no dock on the {edge} edge")
+        dock = next((d for d in on_edge if d in here), on_edge[0])
+    elif own:
+        dock = own
+    else:
+        if not here:
+            die("no dock on the window's screen")
+        m = next(x for x in monitors if x["id"] == c["monitor"])
+        left_side = c["at"][0] + c["size"][0] / 2 - m["x"] < logical(m)[0] / 2
+        dock = next((d for d in here if (d["edge"] == "left") == left_side), here[0])
+    if app:
+        old = window(app, clients)
+        if old and old["address"] != addr and not app.get("multi"):
+            # The app has another window in a dock: that one goes out instead.
+            set_released(released() | {old["address"]})
+            float_window(old)
+        remember(app["id"], addr)
+        if own["id"] == dock["id"]:
+            cmd_expand([dock["id"], app["id"], "on"])
+        else:
+            cmd_take([dock["id"], app["id"]])
+            if is_open(own["id"]) or own.get("keepOpen"):
+                place(own)
+    else:
+        cmd_add([dock["id"], "--window", addr])
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+        refresh_shell()
+    elif quiet:
+        now = next((x for x in hypr("clients") if x["address"] == addr), None)
+        if now:
+            hide_window(now, dock)
+        refresh_shell()
+    else:
+        subprocess.run(["omarchy-shell", "-q", PLUGIN, "open", dock["id"]],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def cmd_release(args):
+    """Let an app's window go: out of the dock, a normal floating window centred
+    on the workspace in front. A favorite stays (opening it in the dock brings
+    the window back); an app only opened in the dock leaves it."""
+    if len(args) < 2:
+        die("release needs a dock and an app")
+    clients = hypr("clients")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        app = find_app(dock, args[1])
+        c = window(app, clients)
+        if not c:
+            die(f"'{app['id']}' has no window in the dock")
+        if is_favorite(app):
+            app["expanded"] = False
+        else:
+            dock["apps"].remove(app)
+        # Nothing else shown: the default instead (or, that one leaving, the
+        # first other running app).
+        others = [a for a in dock["apps"] if a is not app]
+        if not any(is_expanded(a) and window(a, clients) for a in others):
+            d = default_app(dock)
+            nxt = d if d in others else next((a for a in others if window(a, clients)), None)
+            if nxt:
+                nxt["expanded"] = True
+                collapse_others(dock, nxt)
+    set_released(released() | {c["address"]})
+    st = read_state()
+    if st.get("windows", {}).get(app["id"]) == c["address"]:
+        del st["windows"][app["id"]]
+        write_state(st)
+    float_window(c)
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+
+
+def float_window(c):
+    """A normal window: untagged, unpinned, on the workspace in front of the
+    focused screen, three fifths of it wide, centred and focused."""
+    monitors = hypr("monitors")
+    m = next((x for x in monitors if x["focused"]), monitors[0])
+    lw, lh = logical(m)
+    left, top, right, bottom = m.get("reserved", [0, 0, 0, 0])
+    aw, ah = lw - left - right, lh - top - bottom
+    w, h = int(min(aw * 0.6, max(c["size"][0], aw * 0.4))), int(ah * 0.75)
+    x, y = int(m["x"] + left + (aw - w) / 2), int(m["y"] + top + (ah - h) / 2)
+    a = q("address:" + c["address"])
+    # Its titlebar back too: Omarchy's, which the dock took off while docked.
+    exprs = [DOCKED.format(v="-", a=a), f"hl.dsp.window.tag({{ tag = '+{TITLEBAR_TAG}', window = {a} }})"]
+    if c.get("pinned"):
+        exprs.append(f"hl.dsp.window.pin({{ action = 'off', window = {a} }})")
+    exprs += [f"hl.dsp.window.move({{ workspace = {q(m['activeWorkspace']['name'])}, follow = false, window = {a} }})"]
+    if not c["floating"]:
+        exprs.append(f"hl.dsp.window.float({{ action = 'on', window = {a} }})")
+    exprs += [f"hl.dsp.window.resize({{ x = {w}, y = {h}, relative = false, window = {a} }})",
+              f"hl.dsp.window.move({{ x = {x}, y = {y}, relative = false, window = {a} }})",
+              f"hl.dsp.focus({{ window = {a} }})"]
+    dispatch(*exprs)
+
+
+FLOATING = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "omext-dock-float"  # classes to open floating
+
+
+def float_next(names):
+    """The next window of these classes opens as a normal floating window (the
+    watcher lets it go instead of docking it)."""
+    FLOATING.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (FLOATING / n.lower().replace("/", "_")).touch()
+
+
+def floats(c):
+    """True (once) when a window was asked to open floating, in the last 30 s."""
+    for n in (c.get("class"), c.get("initialClass")):
+        f = FLOATING / (n or "-").lower().replace("/", "_")
+        try:
+            fresh = time.time() - f.stat().st_mtime < 30
+        except OSError:
+            continue
+        f.unlink(missing_ok=True)
+        return fresh
+    return False
+
+
+def cmd_float(args):
+    """Open an app outside the docks, as a normal floating window: an installed
+    app (by desktop id), or a dock's app (its window let go when running)."""
+    if len(args) == 1:
+        entry = next((e for e in desktop_entries() if e["id"] == args[0]), None)
+        if not entry:
+            die(f"no installed app '{args[0]}'")
+        float_next([desktop_class(entry)])
+        subprocess.Popen(["setsid", "-f", "uwsm-app", "--", entry["id"]], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        return
+    if len(args) < 2:
+        die("float needs a desktop id, or a dock and an app")
+    app = find_app(find_dock(read_config(), args[0]), args[1])
+    if window(app, hypr("clients")):
+        cmd_release(args)
+        return
+    float_next(classes(app))
+    launch(app)
+
+
+def cmd_quit(args):
+    if len(args) < 2:
+        die("quit needs a dock and an app")
+    data = read_config()
+    dock = find_dock(data, args[0])
+    app = find_app(dock, args[1])
+    c = window(app, hypr("clients"))
+    if not c:
+        return
+    QUIT.mkdir(parents=True, exist_ok=True)
+    (QUIT / app["id"]).touch()
+    dispatch(f"hl.dsp.window.close({{ window = {q('address:' + c['address'])} }})")
+    # Apps that only go to their tray when closed: end the process if it's theirs alone.
+    time.sleep(3)
+    clients = hypr("clients")
+    if any(x["address"] == c["address"] for x in clients):
+        return  # still there: probably asking something
+    if not any(x["pid"] == c["pid"] for x in clients):
+        try:
+            os.kill(c["pid"], 15)
+        except OSError:
+            pass
+    refresh_shell()
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def cmd_restart(args):
+    """Close the app, end it if it lingers (killed if it must be), start it again."""
+    if len(args) < 2:
+        die("restart needs a dock and an app")
+    dock = find_dock(read_config(), args[0])
+    app = find_app(dock, args[1])
+    c = window(app, hypr("clients"))
+    RESTARTING.mkdir(parents=True, exist_ok=True)
+    mark = RESTARTING / app["id"]
+    mark.touch()
+    try:
+        if c:
+            pid = c["pid"]
+            # A process with other windows too (a web app: every window of its
+            # browser is one process) is left running: only the window closes.
+            shared = any(x["pid"] == pid and x["address"] != c["address"] for x in hypr("clients"))
+            dispatch(f"hl.dsp.window.close({{ window = {q('address:' + c['address'])} }})")
+            for sig in () if shared else (None, 15, 9):
+                if sig:
+                    try:
+                        os.kill(pid, sig)
+                    except OSError:
+                        pass
+                for _ in range(30):
+                    if not pid_alive(pid):
+                        break
+                    time.sleep(0.1)
+                else:
+                    continue
+                break
+            # Its window gone too, before it is started again.
+            for _ in range(30):
+                if not any(x["address"] == c["address"] for x in hypr("clients")):
+                    break
+                time.sleep(0.1)
+        launch(app)
+        # Kept marked until its window is back (or a while), so the watcher
+        # neither starts a second one nor lets an opened app leave the dock.
+        for _ in range(150):
+            if window(app, hypr("clients")):
+                break
+            time.sleep(0.1)
+    finally:
+        mark.unlink(missing_ok=True)
+    refresh_shell()
+
+
+def cmd_favorite(args):
+    if len(args) < 3 or args[2] not in ("on", "off"):
+        die("favorite needs a dock, an app and on|off")
+    with Config() as data:
+        app = find_app(find_dock(data, args[0]), args[1])
+        app["favorite"] = args[2] == "on"
+        if not app["favorite"]:
+            app.update({"startOnLoad": False, "keepAlive": False})
+    if args[2] == "off":
+        keep_running()  # not running: it goes now
+    refresh_shell()
+
+
+def cmd_app_flag(args, key, name):
+    if len(args) < 3 or args[2] not in ("on", "off"):
+        die(f"{name} needs a dock, an app and on|off")
+    with Config() as data:
+        find_app(find_dock(data, args[0]), args[1])[key] = args[2] == "on"
+    refresh_shell()
+
+
+def cmd_new(args):
+    if not args or args[0] not in EDGES:
+        die("new needs left or right")
+    name = value(args, "--monitor")
+    monitors = hypr("monitors")
+    m = next((x for x in monitors if x["name"] == name), None) if name else next((x for x in monitors if x["focused"]), None)
+    if not m:
+        die(f"no screen {name}")
+    with Config() as data:
+        if any(d["edge"] == args[0] and d["monitor"] == m["description"] for d in data["docks"]):
+            die(f"{m['name']} already has a dock on the {args[0]}")
+        dock_id = unique(f"{args[0]}-{m['name'].lower()}", {d["id"] for d in data["docks"]})
+        data["docks"].append({"id": dock_id, "monitor": m["description"], "edge": args[0],
+                              "width": 420, "keepOpen": False, "apps": []})
+    refresh_shell()
+    print(dock_id)
+
+
+def cmd_delete(args):
+    if not args:
+        die("delete needs a dock id")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        data["docks"].remove(dock)
+    for app in dock["apps"]:
+        undock_window(app)
+    set_open(dock["id"], False)
+    refresh_shell()
+
+
+def undock_window(app):
+    c = window(app, hypr("clients"))
+    if c:
+        a = q("address:" + c["address"])
+        ws = next((m["activeWorkspace"]["name"] for m in hypr("monitors") if m["focused"]), "1")
+        dispatch(DOCKED.format(v="-", a=a), f"hl.dsp.window.pin({{ action = 'off', window = {a} }})",
+                 f"hl.dsp.window.move({{ workspace = {q(ws)}, follow = false, window = {a} }})")
+
+
+def cmd_width(args):
+    live = flag(args, "--live")
+    if len(args) < 2 or not args[1].isdigit():
+        die("width needs a dock and a number of pixels")
+    monitors = hypr("monitors")
+    if live:  # not saved: the release sets it for good
+        dock = find_dock(read_config(), args[0])
+        set_width(dock, dock_monitor(dock, monitors), args[1])
+        if is_open(dock["id"]) or dock.get("keepOpen"):
+            place(dock, quick=True)
+        return
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        set_width(dock, dock_monitor(dock, monitors), args[1])
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+
+
+def cmd_max_width(args):
+    if len(args) < 2 or not (args[1] == "default" or args[1].isdigit()):
+        die("max-width needs a dock and a percentage or default")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        dock.pop("maxWidth", None)  # pixels, before it was a percentage
+        if args[1] == "default":
+            dock.pop("maxWidthPct", None)
+        else:
+            dock["maxWidthPct"] = max(10, min(100, int(args[1])))
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    refresh_shell()
+
+
+def cmd_keep_open(args):
+    if len(args) < 2 or args[1] not in ("on", "off"):
+        die("keep-open needs a dock and on|off")
+    with Config() as data:
+        dock = find_dock(data, args[0])
+        dock["keepOpen"] = args[1] == "on"
+    # Let go, it stays open as an ordinary open dock (it is under the pointer),
+    # closing as usual once something else gets focus.
+    set_open(dock["id"], True)
+    refresh_shell()
+    # The shell takes the dock's width from the screen (or gives it back) first;
+    # place after that.
+    time.sleep(0.3)
+    place(dock)
+
+
+def cmd_fix_windows(args):
+    """Docked windows drawn out of place (their top cut off): each is set right
+    as it next shows; those showing now, at once."""
+    mark_stale()
+    for dock in read_config()["docks"]:
+        if is_open(dock["id"]) or dock.get("keepOpen"):
+            place(dock)
+
+
+def cmd_candidates():
+    data = read_config()
+    docked = {x for d in data["docks"] for a in d["apps"] for x in classes(a)}
+    apps = []
+    for e in desktop_entries():
+        if e.get("NoDisplay") == "true" or not e.get("Exec"):
+            continue
+        apps.append({"desktop": e["id"], "name": e.get("Name", e["id"][:-8]), "icon": e.get("Icon", ""),
+                     "docked": desktop_class(e).lower() in docked})
+    apps.sort(key=lambda a: a["name"].lower())
+    windows = []
+    for c in hypr("clients"):
+        if not c["mapped"] or c["workspace"]["id"] < 1 or (c["class"] or "").lower() in docked:
+            continue
+        windows.append({"address": c["address"], "title": c["title"], "class": c["class"],
+                        "workspace": c["workspace"]["name"],
+                        "icon": icon_for_class(c["class"] or c["initialClass"])})
+    print(json.dumps({"apps": apps, "windows": windows}, ensure_ascii=False))
+
+
+# --- watch ------------------------------------------------------------------
+
+def owner(clients, addr):
+    """(dock, app) a window belongs to, if any."""
+    c = next((x for x in clients if x["address"] == addr), None)
+    if not c or addr in released():
+        return None, None
+    cands = [(d, a) for d in read_config()["docks"] for a in d["apps"] if matches(a, c)]
+    if len(cands) < 2:
+        return cands[0] if cands else (None, None)
+    # More than one app takes such windows (an app in several docks): the one
+    # that has it, else the one just started that has none yet, else the first
+    # that would take it.
+    wins = read_state().get("windows", {})
+    for d, a in cands:
+        if wins.get(a["id"]) == addr:
+            return d, a
+    takers = [(d, a) for d, a in cands if (window(a, clients) or {}).get("address") == addr]
+    return next(((d, a) for d, a in takers if launching(a)), takers[0] if takers else cands[0])
+
+
+def is_favorite(app):
+    """Every app in a dock stays in it until it is removed (2026-11: there were
+    favorites, which stayed, and apps only opened in a dock, which left it as
+    they closed; that was one thing too many). The "favorite" and "pinned" keys
+    of older configs are left alone and mean nothing."""
+    return True
+
+
+def starts_on_load(app):
+    return not app.get("separator") and app.get("startOnLoad", True)
+
+
+def is_pinned(app):
+    """Its icon is on the dock's bar whether it runs or not: every app's is."""
+    return True
+
+
+def kept_alive(app):
+    return not app.get("separator") and app.get("keepAlive", True)
+
+
+SEEN = set()  # apps the watcher has seen running: keep-alive brings back these
+RUNNING = threading.Lock()  # keep_running runs from the loop and after a window closes
+
+
+def keep_running(login=False):
+    """At login the start-on-load apps start, hidden; keep-alive apps start again
+    when they go (not when quit). Favorites stay in the dock until removed,
+    running or not; other apps leave it once they have closed (and at login)."""
+    with RUNNING:
+        _keep_running(login)
+
+
+def _keep_running(login):
+    clients = hypr("clients")
+    free = released()
+    if free - {c["address"] for c in clients}:
+        set_released(free & {c["address"] for c in clients})  # those closed since
+    gone = set()
+    for dock in read_config()["docks"]:
+        if dock.get("off"):
+            continue  # turned off: its apps left alone
+        for app in dock["apps"]:
+            if (RESTARTING / app["id"]).exists():
+                continue
+            if window(app, clients):
+                SEEN.add(app["id"])
+                continue
+            if released_window(app, clients):
+                continue  # running, let go of: not started again, not gone
+            was = app["id"] in SEEN
+            SEEN.discard(app["id"])
+            if not is_favorite(app):
+                if was or login:
+                    gone.add(app["id"])
+                continue
+            if (QUIT / app["id"]).exists():
+                continue
+            if (login and starts_on_load(app)) or (was and kept_alive(app)):
+                launch(app)
+    changed = bool(gone)
+    with Config() as data:
+        for dock in data["docks"]:
+            if gone:
+                dock["apps"] = [a for a in dock["apps"] if a["id"] not in gone]
+            if not dock.get("off"):
+                changed |= open_default(dock, clients, login)
+    if changed:
+        for dock in read_config()["docks"]:
+            if is_open(dock["id"]) or dock.get("keepOpen"):
+                place(dock)
+        refresh_shell()
+
+
+def launching(app, within=20):
+    try:
+        return time.time() - (LAUNCHING / app["id"]).stat().st_mtime < within
+    except OSError:
+        return False
+
+
+def open_default(dock, clients, login=False):
+    """No open app running (the last one closed or quit), and none starting: the
+    default opens, started if it must be (not if it was quit). At login it is
+    started too. Returns whether anything changed."""
+    d = default_app(dock)
+    if not d:
+        return False
+    shown = [a for a in dock["apps"] if is_expanded(a)]
+    if any(window(a, clients) or launching(a) for a in shown) and not (login and d in shown):
+        return False
+    if (QUIT / d["id"]).exists() or (RESTARTING / d["id"]).exists() or released_window(d, clients):
+        return False
+    changed = not is_expanded(d)
+    for a in shown:
+        if a is not d and not window(a, clients):
+            a["expanded"] = False  # closed: not open any more
+            changed = True
+    d["expanded"] = True
+    collapse_others(dock, d)
+    if not window(d, clients) and not launching(d):
+        launch(d)
+        changed = True
+    return changed
+
+
+def settle(dock):
+    if is_open(dock["id"]) or dock.get("keepOpen"):
+        place(dock)
+    else:
+        close(dock)
+
+
+flashed = {}
+
+
+def count_unread(addr, title):
+    count, flash = 0, ALERT_TITLE.search(title)
+    found = re.search(r"(?:^|\s-\s)\((\d+)\+?\)\s", title)
+    if found:
+        count = int(found.group(1))
+    if not count and not flash:
+        return
+    dock, app = owner(hypr("clients"), addr)
+    if not app or hypr("activewindow").get("address") == addr:
+        return
+    if app.get("alertsOnly"):
+        count = 0
+    held = unread_counts().get(app["id"], 0)
+    at, last = flashed.get(app["id"], (0, ""))
+    if flash:
+        flashed[app["id"]] = (time.time(), title)
+    new = held + 1 if flash and not (time.time() - at < FLASH_WAIT and title == last) else max(held, count)
+    if new != held:
+        hold_unread(app["id"], new)
+        refresh_shell()
+
+
+def rescue_windows():
+    """A screen gone, its workspaces move to the screens left, but their floating
+    windows keep the places and sizes they had there: partly off screen, some
+    larger than the screen. Bring each back inside its screen (its free area,
+    with room for a titlebar), smaller where it has to be."""
+    monitors = {m["id"]: m for m in hypr("monitors")}
+    exprs = []
+    for c in hypr("clients"):
+        m = monitors.get(c["monitor"])
+        if (not m or not c["floating"] or not c["mapped"] or c["workspace"]["id"] < 1
+                or c.get("fullscreen") or DOCKED_TAG in c.get("tags", [])):
+            continue
+        lw, lh = logical(m)
+        left, top, right, bottom = m.get("reserved", [0, 0, 0, 0])
+        bar = 30 if TITLEBAR_TAG in c.get("tags", []) else 0  # drawn above the window
+        ax, ay = m["x"] + left, m["y"] + top + bar
+        aw, ah = int(lw - left - right), int(lh - top - bottom - bar)
+        w, h = min(c["size"][0], aw), min(c["size"][1], ah)
+        x = max(ax, min(c["at"][0], ax + aw - w))
+        y = max(ay, min(c["at"][1], ay + ah - h))
+        if [x, y, w, h] != c["at"] + c["size"]:
+            a = q("address:" + c["address"])
+            exprs += [f"hl.dsp.window.resize({{ x = {w}, y = {h}, relative = false, window = {a} }})",
+                      f"hl.dsp.window.move({{ x = {x}, y = {y}, relative = false, window = {a} }})"]
+    dispatch(*exprs)
+
+
+# Screen changes come in bursts (undocking with the lid shut: the laptop's, each
+# of the dock's, and Hyprland's FALLBACK stand-in, all within a second), so one
+# worker handles a burst: it waits until the changes stop, then acts once.
+_screens = {"timer": None, "removed": False, "restart": False}
+_screens_lock = threading.Lock()
+
+
+def screens_changed(removed, name=""):
+    """A screen came or went. The burst it is part of is handled once, after it."""
+    if name == "FALLBACK":  # Hyprland's stand-in while there is no screen at all
+        return
+    with _screens_lock:
+        _screens["removed"] |= removed
+        if _screens["timer"]:
+            _screens["timer"].cancel()
+        _screens["timer"] = threading.Timer(1.5, _screens_settled)  # let Hyprland move the workspaces first
+        _screens["timer"].daemon = True
+        _screens["timer"].start()
+
+
+def _screens_settled():
+    """After a burst: windows left out of reach come back, and the open docks are
+    placed again (on their own screen, or the one they moved to). A screen gone,
+    the shell is restarted too: Omarchy's launcher dock stops coming back from
+    its bottom edge until it is (2026-11). Not while no screen is left (the lid
+    shut, going to sleep): then when one is back."""
+    with _screens_lock:
+        removed, _screens["removed"], _screens["timer"] = _screens["removed"], False, None
+        if removed:
+            _screens["restart"] = True
+    real = [m for m in hypr("monitors") if m.get("name") != "FALLBACK"]
+    if not real:
+        return
+    if removed:
+        rescue_windows()
+    for dock in read_config()["docks"]:
+        if is_open(dock["id"]) or dock.get("keepOpen"):
+            place(dock)
+    with _screens_lock:
+        restart, _screens["restart"] = _screens["restart"], False
+    if restart:
+        restart_shell()
+    else:
+        refresh_shell()
+
+
+def restart_shell():
+    """omarchy restart shell, never two at once (from this watcher or another):
+    restarts that overlap each start a shell of their own."""
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / "restart-shell.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return  # one is under way: it covers this change too
+        subprocess.run(["omarchy", "restart", "shell"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def untuck(name, were):
+    """The hidden workspace's windows as they were before bring_out tucked them
+    in: at their size, ready to show. Not while it is showing again."""
+    try:
+        if any(m["specialWorkspace"]["name"] == name for m in hypr("monitors")):
+            return
+        now = {c["address"] for c in hypr("clients") if c["workspace"]["name"] == name}
+        exprs = []
+        for c in were:
+            if c["address"] in now:
+                a = q("address:" + c["address"])
+                exprs += [f"hl.dsp.window.resize({{ x = {c['size'][0]}, y = {c['size'][1]}, relative = false, window = {a} }})",
+                          f"hl.dsp.window.move({{ x = {c['at'][0]}, y = {c['at'][1]}, relative = false, window = {a} }})"]
+        dispatch(*exprs)
+    except (Exception, SystemExit) as e:
+        log_event(f"untuck failed: {e}")
+
+
+def bring_out(monitor, name):
+    """Hyprland shows the hidden workspace when one of its windows is activated
+    (a notification clicked, a test focusing it): every docked window on screen,
+    out of place. Hide it again, and open the app activated in its dock."""
+    active = hypr("activewindow").get("address")
+    clients = hypr("clients")
+    dock, app = owner(clients, active) if active else (None, None)
+    # Its windows inside the screen while it slides away, or they are drawn out
+    # of place from then on (see STALE); as they were again once it is gone.
+    m = next((x for x in hypr("monitors") if x["name"] == monitor), None)
+    there = [c for c in clients if c["workspace"]["name"] == name and c["floating"]] if m else []
+    dispatch(*[e for c in there for e in tucked(c, m)],
+             f"hl.dsp.focus({{ monitor = {q(monitor)} }})",
+             f"hl.dsp.workspace.toggle_special({q(name.split(':', 1)[1])})")
+    if there:
+        threading.Timer(slide_time(), untuck, args=(name, there)).start()
+    if not (dock and app):
+        return
+    with Config() as data:
+        d = find_dock(data, dock["id"])
+        a = find_app(d, app["id"])
+        a["expanded"] = True
+        collapse_others(d, a)
+    set_open(dock["id"], True)
+    place(find_dock(read_config(), dock["id"]))
+    focus_still(active)
+    refresh_shell()
+
+
+def launched_as(pid):
+    """The desktop id a process was started from by uwsm-app (its scope is
+    app-<desktop>-<id>-<random>.scope), or ''."""
+    try:
+        cg = Path(f"/proc/{pid}/cgroup").read_text()
+    except OSError:
+        return ""
+    found = re.search(r"/app-[^-/]+-(.+)-[0-9a-f]+\.scope$", cg.strip())
+    if not found:
+        return ""
+    return re.sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m.group(1), 16)), found.group(1))
+
+
+def learn_class(addr):
+    """A window that no app claims, but started from an app's desktop entry: the
+    app's class was a guess (an entry without StartupWMClass), so it takes the
+    window's. Returns the dock and app, as owner() does."""
+    clients = hypr("clients")
+    c = next((c for c in clients if c["address"] == addr), None)
+    if not c or not c["class"]:
+        return None, None
+    desktop = launched_as(c["pid"])
+    if not desktop:
+        return None, None
+    with Config() as data:
+        for dock in data["docks"]:
+            for app in dock["apps"]:
+                ids = [x[:-8] for x in app.get("launch") or [] if x.endswith(".desktop")]
+                if desktop in ids and launching(app) and not window(app, clients):
+                    app["class"] = c["class"]
+                    return dock, app
+    return None, None
+
+
+# A log of what happens to docked windows around screen changes, to find what
+# leaves some drawn ~20 px too high (2026-11). On while STATE/eventlog exists.
+EVENT_LOG = STATE / "events.log"
+LOGGED = ("monitoradded", "monitorremoved", "configreloaded", "openwindow", "closewindow",
+          "movewindowv2", "changefloatingmode", "fullscreen", "pin", "activespecial",
+          "focusedmon", "moveworkspacev2", "workspacev2", "openlayer", "closelayer")
+
+
+def log_event(text):
+    if not (STATE / "eventlog").exists():
+        return
+    try:
+        if EVENT_LOG.exists() and EVENT_LOG.stat().st_size > 4_000_000:
+            EVENT_LOG.replace(STATE / "events.old.log")
+        with open(EVENT_LOG, "a") as f:
+            f.write(f"{time.strftime('%m-%d %H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} {text}\n")
+    except OSError:
+        pass
+
+
+def log_docked(why):
+    """Every docked window, and the screens, as Hyprland has them now."""
+    if not (STATE / "eventlog").exists():
+        return
+    try:
+        for m in hypr("monitors"):
+            log_event(f"  screen {m['name']} at {m['x']},{m['y']} {m['width']}x{m['height']} scale {m['scale']} "
+                      f"reserved {m['reserved']} ws {m['activeWorkspace']['name']} special {m['specialWorkspace']['name']}")
+        for c in hypr("clients"):
+            if DOCKED_TAG in c.get("tags", []) or is_hidden(c["workspace"]["name"]):
+                log_event(f"  {why}: {c['address']} {c['class'][:24]} at {c['at']} size {c['size']} "
+                          f"ws {c['workspace']['name']} mon {c['monitor']} float {c['floating']} pin {c['pinned']} "
+                          f"fs {c['fullscreen']} xw {c['xwayland']} tags {','.join(c.get('tags', []))}")
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
+        log_event(f"  {why}: snapshot failed {e}")
+
+
+def events():
+    path = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())) / "hypr" \
+        / os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "") / ".socket2.sock"
+    while True:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.connect(str(path))
+                for line in sock.makefile("r", encoding="utf-8", errors="replace"):
+                    event, _, rest = line.strip().partition(">>")
+                    if event in LOGGED:
+                        log_event(f"{event} {rest[:120]}")
+                        if event in ("monitoradded", "monitorremoved", "configreloaded"):
+                            threading.Timer(0.3, log_docked, args=(event,)).start()
+                            threading.Timer(4, log_docked, args=(event + "+4s",)).start()
+                    if event == "windowtitlev2":
+                        addr, _, title = rest.partition(",")
+                        count_unread("0x" + addr, title)
+                    elif event == "activewindowv2" and rest:
+                        _, app = owner(hypr("clients"), "0x" + rest)
+                        if app and unread_counts().get(app["id"]):
+                            hold_unread(app["id"], 0)
+                            refresh_shell()
+                    elif event in ("monitorremoved", "monitorremovedv2", "monitoradded", "monitoraddedv2"):
+                        if not event.endswith("v2"):  # each comes in both forms: once is enough
+                            screens_changed(event == "monitorremoved", rest.strip())
+                    elif event == "activespecial":
+                        name, _, monitor = rest.partition(",")
+                        if is_hidden(name):
+                            bring_out(monitor, name)
+                    elif event == "openwindow":
+                        time.sleep(0.5)  # let it map and set its title
+                        addr = "0x" + rest.split(",")[0]
+                        clients = hypr("clients")
+                        c = next((x for x in clients if x["address"] == addr), None)
+                        if c and floats(c):  # opened to float, not to dock
+                            set_released(released() | {addr})
+                            float_window(c)
+                            refresh_shell()
+                            continue
+                        dock, app = owner(clients, addr)
+                        if not dock:
+                            dock, app = learn_class(addr)
+                            dock = dock and find_dock(read_config(), dock["id"])
+                        if dock and not launching(app):
+                            # Opened some other way (the launcher, a layout, the
+                            # app itself): a normal window, never the dock's. Only
+                            # what the dock starts (its menu, a favorite, keep
+                            # alive) opens in it.
+                            set_released(released() | {addr})
+                            refresh_shell()
+                            continue
+                        if dock:
+                            remember(app["id"], addr)  # its own, among its siblings
+                            SEEN.add(app["id"])  # running: once it closes, it may go
+                            settle(dock)
+                            refresh_shell()
+                    elif event == "closewindow":
+                        for dock in read_config()["docks"]:
+                            if is_open(dock["id"]) or dock.get("keepOpen"):
+                                place(dock)
+                        refresh_shell()
+                        # A moment later: gone for good, not reopening its window.
+                        threading.Timer(2, keep_running).start()
+        except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError) as e:
+            print(f"omext-dock watch: events: {e}", file=sys.stderr)
+        time.sleep(5)
+
+
+def cmd_watch():
+    if DISABLED.exists():
+        return  # turned off (omext-dock enable starts it again)
+    for _ in range(20):  # a config being put in place (a link made after the service starts)
+        if CONFIG.exists():
+            break
+        time.sleep(0.5)
+    if not CONFIG.exists():
+        die(f"no docks yet ({CONFIG}): omext-dock new left|right")
+    # A new login: the docks start closed (unless kept open) and their apps are
+    # started again. (Quit marks are in XDG_RUNTIME_DIR: gone too.)
+    st = read_state()
+    st["open"] = []
+    write_state(st)
+    with Config() as data:  # each dock opens on its default (started by keep_running)
+        for dock in data["docks"]:
+            collapse_others(dock, None)
+            ensure_one(dock)
+    threading.Thread(target=events, daemon=True).start()
+    first = True
+    while True:
+        try:
+            keep_running(login=first)
+            if first:
+                time.sleep(3)
+                for dock in read_config()["docks"]:
+                    settle(dock)
+                refresh_shell()
+                first = False
+        except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as e:
+            print(f"omext-dock watch: {e}", file=sys.stderr)
+        time.sleep(20)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    cmd, rest = args[0], args[1:]
+    if os.environ.get("OMEXT_DOCK_LOG") or (STATE / "debug").exists():
+        STATE.mkdir(parents=True, exist_ok=True)
+        with open(STATE / "debug.log", "a") as log:
+            log.write(f"{time.strftime('%H:%M:%S')} {os.getppid()} {' '.join(args)}\n")
+    commands = {
+        "list": lambda: cmd_list(), "open": lambda: cmd_open(rest), "close": lambda: cmd_open(rest, False),
+        "toggle": lambda: cmd_toggle(rest), "expand": lambda: cmd_expand(rest), "add": lambda: cmd_add(rest), "add-separator": lambda: cmd_add_separator(rest),
+        "mode": lambda: cmd_mode(rest), "default": lambda: cmd_default(rest), "look": lambda: cmd_look(rest),
+        "icon-size": lambda: cmd_icon_size(rest), "icon-style": lambda: cmd_icon_style(rest), "separator-look": lambda: cmd_separator_look(rest),
+        "take": lambda: cmd_take(rest), "instance": lambda: cmd_instance(rest),
+        "dock": lambda: cmd_dock_power(rest), "release-all": cmd_release_all,
+        "disable": cmd_disable, "enable": cmd_enable, "enabled": lambda: sys.exit(1 if DISABLED.exists() else 0),
+        "relocate": lambda: cmd_relocate(rest),
+        "multi": lambda: cmd_app_flag(rest, "multi", "multi"),
+        "move": lambda: cmd_move(rest), "remove": lambda: cmd_remove(rest),
+        "release": lambda: cmd_release(rest), "send": lambda: cmd_send(rest), "back": lambda: cmd_back(rest), "float": lambda: cmd_float(rest),
+        "fix-windows": lambda: cmd_fix_windows(rest),
+        "quit": lambda: cmd_quit(rest), "restart": lambda: cmd_restart(rest), "new": lambda: cmd_new(rest),
+        "start-on-load": lambda: cmd_app_flag(rest, "startOnLoad", "start-on-load"),
+        "favorite": lambda: cmd_favorite(rest),
+        "keep-alive": lambda: cmd_app_flag(rest, "keepAlive", "keep-alive"),
+        "pin": lambda: cmd_app_flag(rest, "pinned", "pin"), "delete": lambda: cmd_delete(rest),
+        "width": lambda: cmd_width(rest),
+        "max-width": lambda: cmd_max_width(rest), "keep-open": lambda: cmd_keep_open(rest),
+        "candidates": lambda: cmd_candidates(), "watch": lambda: cmd_watch(),
+        "rescue": lambda: rescue_windows(),
+    }
+    if cmd not in commands:
+        die(f"unknown command {cmd}")
+    commands[cmd]()
+
+
+if __name__ == "__main__":
+    main()

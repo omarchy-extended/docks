@@ -1,0 +1,6 @@
+{
+  // The omarchy-extended group, in Setup (every omext addon has it; any one keeps it).
+  "setup.omext": {"icon": "", "label": "Omarchy Extended", "description": "The omarchy-extended addons, on or off", "aliases": ["omext", "extended"]},
+  // The docks on or off (omext-dock disable lets their windows go first).
+  "setup.omext.docks": {"icon": "󰟢", "label": "Docks", "description": "The dock bars on the screen edges (off: their windows let go first)", "action": "if \"$HOME/.local/bin/omext-dock\" enabled; then \"$HOME/.local/bin/omext-dock\" disable && notify-send Docks \"Turned off\"; else \"$HOME/.local/bin/omext-dock\" enable && notify-send Docks \"Turned on\"; fi", "checked": "[ ! -e \"${XDG_STATE_HOME:-$HOME/.local/state}/omext/docks/disabled\" ]"}
+}

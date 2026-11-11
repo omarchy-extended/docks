@@ -1,0 +1,12 @@
+[Unit]
+Description=Omext docks: keep the dock apps running and in place (omext-dock watch)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/omext-dock watch
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target
