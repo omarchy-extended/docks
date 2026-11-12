@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omext.docks",
   "name": "Edge docks",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "omarchy-extended",
   "license": "MIT",
   "description": "Docks at the screen edges (omext-dock): an invisible strip or a bar opens one on hover; its apps share it, one at a time or any number, with an apps menu of favorites.",
