@@ -1743,7 +1743,7 @@ def cmd_float(args):
         if not entry:
             die(f"no installed app '{args[0]}'")
         float_next([desktop_class(entry)])
-        subprocess.Popen(["setsid", "-f", "uwsm-app", "--", entry["id"]], stdout=subprocess.DEVNULL,
+        subprocess.Popen(["setsid", "-f"] + runnable(["uwsm-app", "--", entry["id"]]), stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         return
     if len(args) < 2:
