@@ -180,16 +180,33 @@ Item {
   readonly property int leaveDelay: 500
   readonly property int openGrace: 2500
 
+  // (text: Hyprland's answer to "cursorpos ; activewindow", two JSON objects.)
   function checkPointer(text) {
-    var at = null
-    try { at = JSON.parse(text) } catch (e) { return }
+    var at = null, front = null
+    try {
+      var cut = text.indexOf("}") + 1
+      at = JSON.parse(text.slice(0, cut))
+      try { front = JSON.parse(text.slice(cut)) } catch (e2) {}
+    } catch (e) { return }
     if (!at || at.x === undefined) return
+    // The window in front, when it is a dialog of an app (a file chooser,
+    // "Save as": omext core tags it omext-dialog-of-<the app's window>) and
+    // the pointer is on it: the address of the app's window. The pointer there
+    // counts as on that app's dock, or going to the dialog would close the
+    // dock and take the dialog away with its app.
+    var dialogOf = ""
+    if (front && front.at && front.size) {
+      var m = 24
+      if (at.x >= front.at[0] - m && at.x < front.at[0] + front.size[0] + m && at.y >= front.at[1] - m && at.y < front.at[1] + front.size[1] + m)
+        for (var tag of (front.tags || [])) if (tag.indexOf("omext-dialog-of-") === 0) dialogOf = tag.slice(16).replace(/\*$/, "")
+    }
     var now = Date.now(), left = {}, been = {}
     for (var d of docks) {
       if (!d.open || !d.rect || (d.keepOpen && picking !== d.id)) continue
       var r = d.rect, grip = 10, onLeft = d.edge === "left", bar = d.barWidth || 0  // its bar counts as on it
       var on = at.x >= r[0] - (onLeft ? bar : grip) && at.x < r[0] + r[2] + (onLeft ? grip : bar)
                && at.y >= r[1] && at.y < r[1] + r[3]
+      if (!on && dialogOf) on = d.apps.some(a => a.address === dialogOf)
       been[d.id] = on || !!pointerBeen[d.id]
       // Back on it while it fades out: it stays open (the close called off),
       // rather than closing and opening again.
@@ -337,7 +354,7 @@ Item {
 
   Process {
     id: pointerProc
-    command: ["hyprctl", "cursorpos", "-j"]
+    command: ["hyprctl", "-j", "--batch", "cursorpos ; activewindow"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.checkPointer(text) }
   }
 
