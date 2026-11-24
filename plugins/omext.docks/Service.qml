@@ -180,25 +180,43 @@ Item {
   readonly property int leaveDelay: 500
   readonly property int openGrace: 2500
 
-  // (text: Hyprland's answer to "cursorpos ; activewindow", two JSON objects.)
+  // The dialogs of apps (a file chooser, "Save as": omext core tags one
+  // omext-dialog-of-<the app's window>) that are on screen:
+  // [{of, x, y, w, h, top}], top the room its title bar takes above it. A dock
+  // draws its frame over every window, so it leaves a dialog's place out.
+  property var dialogs: []
+  // (text: Hyprland's answer to "cursorpos ; clients": a JSON object, then a list.)
   function checkPointer(text) {
-    var at = null, front = null
+    var at = null, clients = []
     try {
       var cut = text.indexOf("}") + 1
       at = JSON.parse(text.slice(0, cut))
-      try { front = JSON.parse(text.slice(cut)) } catch (e2) {}
+      try { clients = JSON.parse(text.slice(cut)) || [] } catch (e2) {}
     } catch (e) { return }
     if (!at || at.x === undefined) return
-    // The window in front, when it is a dialog of an app (a file chooser,
-    // "Save as": omext core tags it omext-dialog-of-<the app's window>) and
-    // the pointer is on it: the address of the app's window. The pointer there
-    // counts as on that app's dock, or going to the dialog would close the
-    // dock and take the dialog away with its app.
+    var found = [], front = null
+    for (var c of clients) {
+      if (!c || !c.at || !c.size || c.mapped === false) continue
+      if (c.focusHistoryID === 0) front = c
+      var of = "", barred = false
+      for (var tag of (c.tags || [])) {
+        if (tag.indexOf("omext-dialog-of-") === 0) of = tag.slice(16).replace(/\*$/, "")
+        else if (tag.indexOf("omarchy-floating-workspace") === 0) barred = true
+      }
+      c.dialogOf = of
+      if (of && !(c.workspace && String(c.workspace.name).indexOf("special:") === 0))
+        found.push({ of: of, x: c.at[0], y: c.at[1], w: c.size[0], h: c.size[1], top: barred ? 32 : 2 })
+    }
+    if (JSON.stringify(found) !== JSON.stringify(dialogs)) dialogs = found
+    // The window in front, when it is such a dialog and the pointer is on it:
+    // the address of the app's window. The pointer there counts as on that
+    // app's dock, or going to the dialog would close the dock and take the
+    // dialog away with its app.
     var dialogOf = ""
-    if (front && front.at && front.size) {
+    if (front && front.dialogOf) {
       var m = 24
-      if (at.x >= front.at[0] - m && at.x < front.at[0] + front.size[0] + m && at.y >= front.at[1] - m && at.y < front.at[1] + front.size[1] + m)
-        for (var tag of (front.tags || [])) if (tag.indexOf("omext-dialog-of-") === 0) dialogOf = tag.slice(16).replace(/\*$/, "")
+      if (at.x >= front.at[0] - m && at.x < front.at[0] + front.size[0] + m && at.y >= front.at[1] - m - 30 && at.y < front.at[1] + front.size[1] + m)
+        dialogOf = front.dialogOf
     }
     var now = Date.now(), left = {}, been = {}
     for (var d of docks) {
@@ -354,18 +372,23 @@ Item {
 
   Process {
     id: pointerProc
-    command: ["hyprctl", "-j", "--batch", "cursorpos ; activewindow"]
+    command: ["hyprctl", "-j", "--batch", "cursorpos ; clients"]
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.checkPointer(text) }
   }
 
   // Unread counts and apps starting or closing, besides what omext-dock reports.
-  Timer { interval: 5000; repeat: true; running: true; onTriggered: root.refresh() }
+  Timer { interval: 5000; repeat: true; running: true; onTriggered: { root.refresh(); if (root.docks.some(d => d.open)) dialogLook.restart() } }
   Timer {
-    interval: 100
+    // (Faster with a dialog up: its place is left out of the frame, and it may be on the move.)
+    interval: root.dialogs.length > 0 ? 40 : 100
     repeat: true
-    running: root.docks.some(d => d.open && (!d.keepOpen || root.picking === d.id))
+    running: root.docks.some(d => d.open && (!d.keepOpen || root.picking === d.id)) || root.dialogs.length > 0
     onTriggered: if (!pointerProc.running) pointerProc.running = true
   }
+  // A dock kept open isn't watched as above: a look for dialogs when the
+  // window in front changes (a dialog opening is one), and every few seconds.
+  Timer { id: dialogLook; interval: 250; onTriggered: if (!pointerProc.running) pointerProc.running = true }
+  Connections { target: Hyprland; function onActiveToplevelChanged() { dialogLook.restart() } }
   Component.onCompleted: refresh()
 
   // Sizes are the shell's own (Commons.Style), as the top bar uses: its text at
@@ -764,10 +787,42 @@ Item {
       // one beside the menu closes it.
       readonly property bool menuOpen: root.moreFor.startsWith(modelData + "/")
       mask: Region { id: maskRegion }
-      onMaskRectsChanged: {
+      onMaskRectsChanged: setMask()
+      function setMask() {
         var old = maskRegion.regions
         maskRegion.regions = maskRects.map(r => regionComponent.createObject(maskRegion, { x: r[0], y: r[1], width: r[2], height: r[3] }))
+          .concat(holes.map(r => regionComponent.createObject(maskRegion, { x: r[0], y: r[1], width: r[2], height: r[3], intersection: Intersection.Subtract })))
         for (var i = 0; i < old.length; i++) old[i].destroy()
+      }
+
+      // The places of its apps' dialogs, in the panel's own coordinates:
+      // [[x, y, w, h]]. The dock is drawn over every window (a panel is either
+      // under all of them or over all of them), so where a dialog is, it draws
+      // nothing and takes no clicks: the dialog is in front of the dock there,
+      // wherever it is moved.
+      readonly property var holes: {
+        if (!dock || !isOpen || !screen) return []
+        var gx = screen.x + (onLeft ? 0 : screen.width - width), gy = topY, out = []
+        for (var g of root.dialogs) {
+          if (!dock.apps.some(a => a.address === g.of)) continue
+          var x = g.x - gx - 2, y = g.y - gy - g.top, w = g.w + 4, h = g.h + g.top + 2
+          if (x < width && x + w > 0 && y < height && y + h > 0) out.push([x, y, w, h])
+        }
+        return out
+      }
+      onHolesChanged: { setMask(); contentItem.layer.enabled = holes.length > 0 }
+      Component { id: holeEffect; MultiEffect { maskEnabled: true; maskInverted: true; maskSource: holeMask } }
+      Component.onCompleted: contentItem.layer.effect = holeEffect
+      Item {
+        id: holeMask
+        width: panel.width
+        height: panel.height
+        visible: false
+        layer.enabled: panel.holes.length > 0
+        Repeater {
+          model: panel.holes
+          Rectangle { required property var modelData; x: modelData[0]; y: modelData[1]; width: modelData[2]; height: modelData[3]; color: "black" }
+        }
       }
 
       // An app's colour: the accent's hue turned by its place in the dock.
